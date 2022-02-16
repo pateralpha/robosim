@@ -464,7 +464,7 @@ int main(void){
 
     for(int n = 0;n < N;n += skip){
         fprintf(fp, "%5.2f %6.3f %6.3f %6.1f %5.1f %5.1f %5.1f ",
-                out_v[n].t, out_v[n].x[0], out_v[n].x[1], out_v[n].x[2] / pi * 180, out_v[n].e[0], out_v[n].e[1], out_v[n].e[2]);
+                out_v[n].t, out_v[n].x[0], out_v[n].x[1], out_v[n].x[2], out_v[n].e[0], out_v[n].e[1], out_v[n].e[2]);
 
         for(int k = 0;k < 6;k++){
             machine[k] = out_v[n].x + Jux(out_v[n].x[2]) * machine_pos[k];
