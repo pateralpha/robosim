@@ -315,10 +315,6 @@ struct fmatrix : public array<fvector<M>, N>{
         float d = 1;
         for_range(i, N) d *= m[i][i];
         return d *(p % 2 ? - 1 : 1);
-
-        // float d = 0;
-        // for_range(i, N) d += sgn(i, 0) * (*this)[i][0] * minor_det(i, 0);
-        // return d;
     }
 
     const fmatrix<N, N> adj(void) const{
@@ -337,7 +333,6 @@ struct fmatrix : public array<fvector<M>, N>{
             m[i] = solve(v);
         }
         return m.trans();
-        return det() ? adj() / det() : fmatrix<N, N>(0);
     }
 
     const fmatrix<N, N> lu(fvector<N> &_p, int &_pivot) const{
@@ -630,75 +625,78 @@ constexpr float R = 0.5; // radius of the machine / distance between CoG and whe
 
 wheel w1(0.0083 * 14, 0.12, 0.33, 0.8);
 
-matrix3 M(vector3(15, 15, inertia_of_cylinder(15, R)));
-matrix3 I(vector3(inertia_of_cylinder(0.1, r), inertia_of_cylinder(0.1, r), inertia_of_cylinder(0.1, r)));
+auto M = diag(fvector<3>(15, 15, inertia_of_cylinder(15, R)));
+auto I = diag(fvector<3>(inertia_of_cylinder(0.1, r), inertia_of_cylinder(0.1, r), inertia_of_cylinder(0.1, r)));
 
 float Juw_elm[] = {
         cosf(2 * pi / 3)/ r, cosf(4 * pi / 3)/ r, cosf(0)/ r,
         sinf(2 * pi / 3)/ r, sinf(4 * pi / 3)/ r, sinf(0)/ r,
         R / r, R / r, R / r
 };
-matrix3 Juw(Juw_elm);
+fmatrix<3, 3> Juw = fmatrix<3, 3>(Juw_elm).trans();
 
-matrix3 Jux(float _theta){
+fmatrix<3, 3> Jux(float _theta){
     float elm[] = {
             cosf(_theta), sinf(_theta), 0, 
             - sinf(_theta), cosf(_theta), 0,
             0, 0, 1
     };
-    return matrix3(elm);
+    return fmatrix<3, 3>(elm).trans();
 }
 
-matrix3 dJux(float _theta, float _dtheta){
+fmatrix<3, 3> dJux(float _theta, float _dtheta){
     float elm[] = {
             - sinf(_theta) * _dtheta, cosf(_theta) * _dtheta, 0, 
             - cosf(_theta) * _dtheta, - sinf(_theta) * _dtheta, 0,
             0, 0, 0
     };
-    return matrix3(elm);
+    return fmatrix<3, 3>(elm).trans();
 }
 
-matrix3 J(float _theta){
+fmatrix<3, 3> J(float _theta){
     return Jux(_theta) * Juw.inv();
 }
 
-matrix3 dJ(float _theta, float _dtheta){
+fmatrix<3, 3> dJ(float _theta, float _dtheta){
     return dJux(_theta, _dtheta) * Juw.inv();
 }
 
-vector6 f(vector6 _x, vector3 _e){
-    vector3 x = _x.upper(), dx = _x.lower();
+const fvector<3> upper(const fvector<6> &_v){ return fvector<3>(_v[0], _v[1], _v[2]); }
+const fvector<3> lower(const fvector<6> &_v){ return fvector<3>(_v[3], _v[4], _v[5]); }
+
+fvector<6> f(fvector<6> _x, fvector<3> _e){
+    fvector<3> x = upper(_x), dx = lower(_x);
     float theta = x[2], dtheta = dx[2];
 
-    vector3 omega = J(theta).inv() * dx;
+    fvector<3> omega = J(theta).inv() * dx;
 
-    vector3 tau(
+    fvector<3> tau(
             w1.torque(omega[0], _e[0]), 
             w1.torque(omega[1], _e[1]), 
             w1.torque(omega[2], _e[2])
     );
 
-    vector3 ddx = (M + J(theta).trans().inv() * I * J(theta).inv()).inv() * J(theta).trans().inv() * (tau - I * dJ(theta, dtheta) * dx);
+    fvector<3> ddx = (M + J(theta).trans().inv() * I * J(theta).inv()).inv() * J(theta).trans().inv() * (tau - I * dJ(theta, dtheta) * dx);
 
-    return vector6(dx, ddx);
+    return fvector<6>(dx[0], dx[1], dx[2], ddx[0], ddx[1], ddx[2]);
 }
 
-vector3 du(vector3 _dx, vector3 _u){
+fvector<3> du(fvector<3> _dx, fvector<3> _u){
     return Jux(_u[2]).inv() * _dx;
 }
 
-void state(vector6 &_x, vector3 &_tau, vector3 &_i, vector3 _e){
-    vector3 x = _x.upper(), dx = _x.lower();
+void state(fvector<6> &_x, fvector<3> &_tau, fvector<3> &_i, fvector<3> _e){
+    fvector<3> x = upper(_x), dx = lower(_x);
     float theta = x[2], dtheta = dx[2];
 
-    vector3 omega = J(theta).inv() * dx;
+    fvector<3> omega = J(theta).inv() * dx;
 
-    _tau = vector3(
+    _tau = fvector<3>(
             w1.torque(omega[0], _e[0]), 
             w1.torque(omega[1], _e[1]), 
             w1.torque(omega[2], _e[2])
     );
-    _i = vector3(
+    _i = fvector<3>(
             w1.current(omega[0], _e[0]), 
             w1.current(omega[1], _e[1]),
             w1.current(omega[2], _e[2])
@@ -710,22 +708,22 @@ constexpr int N = 300;
 struct output{
     float t;
 
-    vector3 x;
-    vector3 dx;
+    fvector<3> x;
+    fvector<3> dx;
 
-    vector3 e;
-    vector3 tau;
-    // vector3 i;
+    fvector<3> e;
+    fvector<3> tau;
+    fvector<3> i;
 } out_v[N];
 
-output log(float _t, vector6 _x, vector3 _e, vector3 _tau, vector3 _i){
+output log(float _t, fvector<6> _x, fvector<3> _e, fvector<3> _tau, fvector<3> _i){
     output ret;
     ret.t = _t;
-    ret.x = _x.upper();
-    ret.dx = _x.lower();
+    ret.x = upper(_x);
+    ret.dx = lower(_x);
     ret.e = _e;
     ret.tau = _tau;
-    // ret.i = _i;
+    ret.i = _i;
     return ret;
 }
 
@@ -744,8 +742,8 @@ int main(void){
     char fname[] = "a.dat";
     fname[0] = 'a';
 
-    vector3 machine_pos[6];
-    matrix3 Rr = Jux(2*pi/3), Rl = Jux(-2*pi/3);
+    fvector<3> machine_pos[6];
+    fmatrix<3, 3> Rr = Jux(2*pi/3), Rl = Jux(-2*pi/3);
 
     machine_pos[4] = {-0.08, -0.45, 0};
     machine_pos[5] = {0.08, -0.45, 0};
@@ -761,51 +759,18 @@ int main(void){
     //     machine_pos_[k] = init_vec<3>(machine_pos[k].e);
     // }
 
-    // float param[] = {1, 2, 3, 3, 2, 1, 2, 4, -3};
-    float param[] = {1, 2, 3, 4, 5, 6, 7, 8, -2};
-    float param2[] = {2, 1, 3, 0, 2, 3, 4, 5, 6};
 
-    matrix3 A(param);
-    matrix3 B(param2);
-    vector3 V(1, 2, 3);
-
-    fmatrix<3, 3> a(1, 2, 3, 4, 5, 6, 7, 8, -2);
-    fmatrix<3, 3> b(2, 1, 3, 0, 2, 3, 4, 5, 6);
-
-    fmatrix<3, 3> aa = a.trans();
-    fmatrix<3, 3> bb = b.trans();
-    fmatrix<3, 2> cc(1, 2, 3, 4, 5, 6);
-
-    fvector<4> vv(1, 2, 5, 3);
-
-    // auto aa = eye<2>() * 2;
-    aa.print();
-    A.inv().print();
-    aa.inv().print();
-    (aa.inv() * aa).print();
-    puts("");
-    // aa.solve(fvector<3>(0, 0, 1)).print();
-    puts("");
-    
-    bb.print();
-    B.inv().print();
-    bb.inv().print();
-    (bb.inv() * bb).print();
-
-    printf("%6.2f %6.2f\r\n", A.det(), aa.det());
-    printf("%6.2f %6.2f\r\n", B.det(), bb.det());
-
-    for(int n = 0;n < N;n++) out_v[n] = {0, vector3(), vector3(), vector3(), vector3()};
+    for(int n = 0;n < N;n++) out_v[n] = {0, fvector<3>(), fvector<3>(), fvector<3>(), fvector<3>()};
     constexpr float dt = 0.01;
     float t = 0;
 
-    vector6 v;
-    vector3 x, dx;
-    vector3 e, pe;
+    fvector<6> v;
+    fvector<3> x, dx;
+    fvector<3> e, pe;
 
-    vector3 u;
+    fvector<3> u;
 
-    vector3 omega, tau, i;
+    fvector<3> omega, tau, i;
 
     constexpr float max_voltage = 18; // muximum voltage
     constexpr float sat_time = 0.2; // minimum time from 0 V to maximum
@@ -813,15 +778,15 @@ int main(void){
 
     constexpr float m_per_pulse = 0.2355e-3;
 
-    matrix3 Kp(vector3(1, 1, 2));
-    matrix3 Kd(vector3(0.1, 0.1, 0.2));
+    auto Kp = diag<3>(1, 1, 2);
+    auto Kd = diag<3>(1, 0.1, 0.2);
 
-    vector3 xd(2, 1, pi/4);
+    fvector<3> xd(2, 1, pi/4);
 
     int enc_u = 0, enc_v = 0;
     int p_enc_u = enc_u, p_enc_v = enc_v;
-    vector3 del_u;
-    vector3 x_cal, p_x_cal;
+    fvector<3> del_u;
+    fvector<3> x_cal, p_x_cal;
 
     for(int n = 0;n < N;n++, t += dt){
         // printf("%5.2f  ", t);
@@ -829,10 +794,10 @@ int main(void){
         // printf("       ");
         // e.print();
 
-        x = v.upper();
-        dx = v.lower();
+        x = upper(v);
+        dx = lower(v);
 
-        out_v[n] = {t, x, dx, e, tau};
+        out_v[n] = log(t, v, e, tau, i);
 
         // controller
 
@@ -840,7 +805,7 @@ int main(void){
         enc_u = u[0] / m_per_pulse;
         enc_v = u[1] / m_per_pulse;
 
-        del_u = vector3(
+        del_u = fvector<3>(
                 (enc_u - p_enc_u)* m_per_pulse, 
                 (enc_v - p_enc_v)* m_per_pulse, 
                 0
@@ -861,7 +826,7 @@ int main(void){
             if(fabsf(e[i]) > 18) e[i] = std::copysign(18, e[i]);
         }
 
-        vector3 diff_e = e - pe;
+        fvector<3> diff_e = e - pe;
         float de_max = diff_e.abs().max();
 
         for(int i = 0;i < 3;i++){
@@ -873,8 +838,8 @@ int main(void){
 
         // end
 
-        v = rk4<vector6>(v, [=](vector6 _v){ return f(_v, e); }, dt);
-        u = rk4<vector3>(u, [=](vector3 _u){ return du(dx, _u); }, dt);
+        v = rk4<fvector<6>>(v, [=](fvector<6> _v){ return f(_v, e); }, dt);
+        u = rk4<fvector<3>>(u, [=](fvector<3> _u){ return du(dx, _u); }, dt);
 
         state(v, tau, i, e);
     }
@@ -889,8 +854,7 @@ int main(void){
 
     printf("save to file...%s\r\n", fname);
     fprintf(fp, "# time x y theta e1 e2 e3 mx1 my1...\r\n");
-    vector3 machine[6];
-    fvector<3> machine_[6];
+    fvector<3> machine[6];
 
     constexpr int skip = 5;
 
@@ -900,9 +864,8 @@ int main(void){
 
         for(int k = 0;k < 6;k++){
             machine[k] = out_v[n].x + Jux(out_v[n].x[2]) * machine_pos[k];
-            // machine_[k] = out_v[n].x + Jux(out_v[n].x[2]) * machine_pos_[k];
             fprintf(fp, "%6.3f %6.3f ", machine[k][0], machine[k][1]);
-            // printf("%6.3f %6.3f ", machine_[k][0], machine_[k][1]);
+            // printf("%6.3f %6.3f ", machine[k][0], machine[k][1]);
         }
         fprintf(fp, "\r\n");
         // printf("\r\n");

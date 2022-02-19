@@ -37,8 +37,8 @@ set size ratio -1
 set parametric
 
 
-set terminal gif animate delay 5 optimize size 700, 700
-set output "view.gif"
+# set terminal gif animate delay 5 optimize size 700, 700
+# set output "view.gif"
 
 do for [i = 1:N]{
     do for [j = 1:M]{
@@ -55,7 +55,7 @@ do for [i = 1:N]{
          y_mt using (x_mt[$1]):2 w l lw 3 lc 'gray50' notitle, \
          (rad*cos(t) + x_d), (rad*sin(t) + y_d) lw 1.5 lc 'blue' notitle, \
          (rad*cos(t) + x_c[1]), (rad*sin(t) + y_c[1]) lw 1.5 lc 'red' notitle
-    # pause 0.05
+    pause 0.05
 }
 
-set output
+# set output
