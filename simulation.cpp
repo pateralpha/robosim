@@ -22,51 +22,6 @@ inline void swap(T &_v1, T &_v2){
     _v2 = t;
 }
 
-struct vector3{
-    float e[3];
-
-    vector3(void){ memset(e, 0, sizeof(float)* 3); }
-    vector3(float _v[]){ memcpy(e, _v, sizeof(float)* 3); }
-    vector3(float _v1, float _v2, float _v3){
-        e[0] = _v1;
-        e[1] = _v2;
-        e[2] = _v3;
-    }
-    float &operator [](int i){ return e[i]; }
-
-    vector3 add(vector3 _v){
-        vector3 ret(this->e);
-        for(int k = 0;k < 3;k++) ret.e[k] += _v.e[k];
-        return ret;
-    }
-
-    vector3 sub(vector3 _v){
-        vector3 ret(this->e);
-        for(int k = 0;k < 3;k++) ret.e[k] -= _v.e[k];
-        return ret;
-    }
-
-    vector3 operator +(vector3 _v){ return add(_v); }
-    vector3 operator -(vector3 _v){ return sub(_v); }
-
-    vector3 mul(float _f){
-        vector3 ret(this->e);
-        for(int k = 0;k < 3;k++) ret.e[k] *= _f;
-        return ret;
-    }
-
-    vector3 operator *(float _f){ return mul(_f); }
-
-    vector3 abs(void){ return vector3(fabsf(e[0]), fabsf(e[1]), fabsf(e[2])); }
-    float max(void){ return std::max(std::max(e[0], e[1]), e[2]); }
-
-    void print(void){
-        printf("(%6.2f; %6.2f; %6.2f)\r\n", e[0], e[1], e[2]);
-    }
-};
-
-vector3 operator *(float _f, vector3 _v){ return _v.mul(_f); }
-
 #define for_range(i, n) for(int i = 0;i < n;i++)
 
 template <std::size_t N>
@@ -445,148 +400,6 @@ void diag(fmatrix<N, N> &_m, int _i, const float _f){
     _m[_i][_i] = _f;
 }
 
-struct vector6{
-    float e[6];
-
-    vector6(void){ memset(e, 0, sizeof(float)* 6); }
-    vector6(float _v1, float _v2, float _v3, float _v4, float _v5, float _v6){
-        e[0] = _v1;
-        e[1] = _v2;
-        e[2] = _v3;
-        e[3] = _v4;
-        e[4] = _v5;
-        e[5] = _v6;
-    }
-    vector6(float _v[]){ memcpy(e, _v, sizeof(float)* 6); }
-    vector6(vector3 _v1, vector3 _v2){
-        memcpy(e, _v1.e, sizeof(float)* 3);
-        memcpy(e + 3, _v2.e, sizeof(float)* 3);
-    }
-    float &operator [](int i){ return e[i]; }
-
-    vector3 upper(void){
-        return vector3(e[0], e[1], e[2]);
-    }
-
-    vector3 lower(void){
-        return vector3(e[3], e[4], e[5]);
-    }
-
-    vector6 add(vector6 _v){
-        vector6 ret(this->e);
-        for(int k = 0;k < 6;k++) ret.e[k] += _v.e[k];
-        return ret;
-    }
-
-    vector6 sub(vector6 _v){
-        vector6 ret(this->e);
-        for(int k = 0;k < 6;k++) ret.e[k] -= _v.e[k];
-        return ret;
-    }
-
-    vector6 operator +(vector6 _v){ return add(_v); }
-    vector6 operator -(vector6 _v){ return sub(_v); }
-
-    vector6 mul(float _f){
-        vector6 ret(this->e);
-        for(int k = 0;k < 6;k++) ret.e[k] *= _f;
-        return ret;
-    }
-
-    vector6 operator *(float _f){ return mul(_f); }
-
-    void print(void){
-        printf("(%6.2f; %6.2f; %6.2f; %6.2f; %6.2f; %6.2f)\r\n", e[0], e[1], e[2], e[3], e[4], e[5]);
-    }
-};
-
-vector6 operator *(float _f, vector6 _v){ return _v.mul(_f); }
-
-struct matrix3{
-    float e[9];
-
-    matrix3(void){}
-    matrix3(vector3 _v1, vector3 _v2, vector3 _v3){
-        memcpy(e, _v1.e, sizeof(float) * 3);
-        memcpy(e + 3, _v2.e, sizeof(float) * 3);
-        memcpy(e + 6, _v3.e, sizeof(float) * 3);
-    }
-    matrix3(float _e[]){ memcpy(e, _e, sizeof(float)* 9); }
-    matrix3(vector3 _v){ 
-        for(int k = 0;k < 9;k++) e[k] = 0;
-        e[0] = _v.e[0];
-        e[4] = _v.e[1];
-        e[8] = _v.e[2];
-    }
-
-    float &operator ()(int i){ return e[i]; }
-
-    matrix3 trans(void){
-        matrix3 ret(*this);
-        ret.e[1] = e[3];
-        ret.e[2] = e[6];
-        ret.e[3] = e[1];
-        ret.e[5] = e[7];
-        ret.e[6] = e[2];
-        ret.e[7] = e[5];
-
-        return ret;
-    }
-
-    float det(void){
-        return e[0] * e[4] * e[8] + e[3] * e[7] * e[2] + e[6] * e[1] * e[5]
-                - e[0] * e[7] * e[5] - e[3] * e[1] * e[8] - e[6] * e[4] * e[2];
-    }
-
-    matrix3 inv(void){
-        matrix3 ret;
-        float d = det();
-        ret.e[0] = e[4] * e[8] - e[7] * e[5];
-        ret.e[1] = - e[1] * e[8] + e[7] * e[2];
-        ret.e[2] = e[1] * e[5] - e[4] * e[2];
-        ret.e[3] = - e[3] * e[8] + e[6] * e[5];
-        ret.e[4] = e[0] * e[8] - e[6] * e[2];
-        ret.e[5] = - e[0] * e[5] + e[3] * e[2];
-        ret.e[6] = e[3] * e[7] - e[6] * e[4];
-        ret.e[7] = - e[0] * e[7] + e[6] * e[1];
-        ret.e[8] = e[0] * e[4] - e[3] * e[1];
-        for(int k = 0;k < 9;k++) ret.e[k] /= d;
-        return ret;
-    }
-
-    matrix3 add(matrix3 _v){
-        matrix3 ret(this->e);
-        for(int k = 0;k < 9;k++) ret.e[k] += _v.e[k];
-        return ret;
-    }
-
-    vector3 prod(vector3 _v){
-        vector3 ret;
-        ret.e[0] = e[0] * _v.e[0] + e[3] * _v.e[1] + e[6] * _v.e[2];
-        ret.e[1] = e[1] * _v.e[0] + e[4] * _v.e[1] + e[7] * _v.e[2];
-        ret.e[2] = e[2] * _v.e[0] + e[5] * _v.e[1] + e[8] * _v.e[2];
-        return ret;
-    }
-
-    matrix3 prod(matrix3 _v){
-        vector3 v1(_v.e[0], _v.e[1], _v.e[2]),
-                v2(_v.e[3], _v.e[4], _v.e[5]),
-                v3(_v.e[6], _v.e[7], _v.e[8]);
-        matrix3 ret(prod(v1), prod(v2), prod(v3));
-        return ret;
-    }
-
-    matrix3 operator +(matrix3 _v){ return add(_v); }
-    vector3 operator *(vector3 _v){ return prod(_v); }
-    matrix3 operator *(matrix3 _v){ return prod(_v); }
-
-    void print(void){
-        printf("(%6.2f, %6.2f, %6.2f;\r\n", e[0], e[3], e[6]);
-        printf(" %6.2f, %6.2f, %6.2f;\r\n", e[1], e[4], e[7]);
-        printf(" %6.2f, %6.2f, %6.2f)\r\n", e[2], e[5], e[8]);
-    }
-};
-
 class wheel{
 public:
     wheel(
@@ -623,7 +436,7 @@ private:
 constexpr float r = 0.05; // radius of the wheel
 constexpr float R = 0.5; // radius of the machine / distance between CoG and wheels
 
-wheel w1(0.0083 * 14, 0.12, 0.33, 0.8);
+wheel w1(0.0083 * 14, 0.22, 0.33, 0.8);
 
 auto M = diag(fvector<3>(15, 15, inertia_of_cylinder(15, R)));
 auto I = diag(fvector<3>(inertia_of_cylinder(0.1, r), inertia_of_cylinder(0.1, r), inertia_of_cylinder(0.1, r)));
@@ -754,11 +567,6 @@ int main(void){
     machine_pos[2] = Rl * machine_pos[4];
     machine_pos[3] = Rl * machine_pos[5];
 
-    // fvector<3> machine_pos_[6];
-    // for(int k = 0;k < 6;k++){
-    //     machine_pos_[k] = init_vec<3>(machine_pos[k].e);
-    // }
-
 
     for(int n = 0;n < N;n++) out_v[n] = {0, fvector<3>(), fvector<3>(), fvector<3>(), fvector<3>()};
     constexpr float dt = 0.01;
@@ -779,7 +587,7 @@ int main(void){
     constexpr float m_per_pulse = 0.2355e-3;
 
     auto Kp = diag<3>(1, 1, 2);
-    auto Kd = diag<3>(1, 0.1, 0.2);
+    auto Kd = diag<3>(0.3, 0.3, 0.6);
 
     fvector<3> xd(2, 1, pi/4);
 
@@ -861,6 +669,7 @@ int main(void){
     for(int n = 0;n < N;n += skip){
         fprintf(fp, "%5.2f %6.3f %6.3f %6.1f %5.1f %5.1f %5.1f ",
                 out_v[n].t, out_v[n].x[0], out_v[n].x[1], out_v[n].x[2], out_v[n].e[0], out_v[n].e[1], out_v[n].e[2]);
+        fprintf(fp, "%6.2f %6.2f %6.2f ", out_v[n].i[0], out_v[n].i[1], out_v[n].i[2]);
 
         for(int k = 0;k < 6;k++){
             machine[k] = out_v[n].x + Jux(out_v[n].x[2]) * machine_pos[k];

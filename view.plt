@@ -20,7 +20,7 @@ y_d = 1.0
 
 # save data to array
 stats fn using ((x_c[$0 + 1] = $2, y_c[$0 + 1] = $3, t_c[$0 + 1] = $4, 0)) nooutput
-stats fn using (sum[i = 1:M] (x_m[$0*M + i] = column(i*2 + 6), y_m[$0*M + i] = column(i*2 + 7), 0)) nooutput
+stats fn using (sum[i = 1:M] (x_m[$0*M + i] = column(i*2 + 9), y_m[$0*M + i] = column(i*2 + 10), 0)) nooutput
 
 
 # display data
