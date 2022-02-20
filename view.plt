@@ -61,10 +61,10 @@ rad = 0.05
 set parametric
 set sample 500
 
-set terminal gif animate delay 5 optimize size 500, 500 font 'TimesNewRoman, 12'
-set output "view.gif"
+# set terminal gif animate delay 5 optimize size 500, 500 font 'TimesNewRoman, 12'
+# set output "view.gif"
 
-# set terminal qt size 500, 500 font 'TimesNewRoman, 12'
+set terminal qt size 500, 500 font 'TimesNewRoman, 12'
 
 # set xrange [-1:3]
 # set yrange [-1:3]
@@ -115,7 +115,7 @@ do for [i = 1:N]{
         (rad*cos(t) + x_c[1]), (rad*sin(t) + y_c[1]) lw 2 lc 'red' notitle, \
         y_obs using (x_obs[$1]):2 w filledc x2 fill pattern 4 lc 'gray40' notitle, \
         y_obs using (x_obs[$1]):2 w l lw 2 lc 'gray40' notitle
-    # pause 0.05
+    pause 0.05
 }
 
-set output
+# set output

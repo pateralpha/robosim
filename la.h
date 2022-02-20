@@ -73,6 +73,7 @@ struct fvector : public array<float, N>{
         fvector<N> v = *this;
         return v -= _v;
     }
+    const fvector<N> operator -(void) const{ return *this * (- 1); }
 
     fvector<N> &mul_eq(const float _a){
         for(float &v : *this) v *= _a;
@@ -207,6 +208,8 @@ struct fmatrix : public array<fvector<M>, N>{
         fmatrix<N, M> m = *this;
         return m -= _m;
     }
+
+    const fmatrix<N, M> operator -(void) const{ return *this * (- 1); }
 
     fmatrix<N, M> &mul_eq(const float _a){
         for(auto &v : *this) v *= _a;

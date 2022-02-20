@@ -207,27 +207,40 @@ int main(void){
 
     constexpr float max_voltage = 18; // muximum voltage
     constexpr float sat_time = 0.2; // minimum time from 0 V to maximum
-    constexpr float de = 18 / sat_time * dt;
+    constexpr float de = max_voltage / sat_time * dt;
 
     constexpr float m_per_pulse = 0.2355e-3;
 
-    auto Kp = diag<3>(1, 1, 2);
-    auto Kd = diag<3>(0.2, 0.2, 0.4);
-    constexpr float eps = 0.1;
+    auto Kp = diag<3>(1, 5, 2);
+    auto Kd = diag<3>(0.2, 1, 0.4);
+    constexpr float eps = 1;
 
 
-    constexpr int n_xd = 1;
-    // fvector<3> xd_arr[n_xd] = {{2, 1, pi/4}, {2, 3, pi/4}, {1, 4, 0}};
-    fvector<3> xd_arr[n_xd] = {{3, 4, pi/4}};
-    fvector<3> xd = xd_arr[0];
+    fvector<3> xd_arr[] = {{2, 1, pi/4}, {2, 4, pi/4}, {1, 4, 0}};
+    // fvector<3> xd_arr[] = {{3, 4, pi/4}};
+    int n_xd = sizeof(xd_arr) / sizeof(xd_arr[0]);
+    fvector<3> xd = xd_arr[0], p_xd;
 
-    int index_xd = 0;
+    int index_xd = 1;
 
     int enc_u = 0, enc_v = 0;
     int p_enc_u = enc_u, p_enc_v = enc_v;
     fvector<3> del_u;
     fvector<3> x_cal, p_x_cal;
 
+    fvector<3> x_org = upper(v);
+    
+    fvector<3> uv, duv;
+    float arg_uv;
+
+    if((x_org[0] != xd[0])||(x_org[1] != xd[1])){
+        arg_uv = atan2(xd[1] - x_org[1], xd[0] - x_org[0]);
+    }
+    else arg_uv = 0;
+
+    fvector<3> input;
+
+    /* simulation for loop starts here */
     for(int n = 0;n < N;n++, t += dt){
 
         x = upper(v);
@@ -235,9 +248,8 @@ int main(void){
 
         out_v[n] = log(t, v, xd, e, tau, i);
 
-        // controller
-
-        // dead reckoning
+        /**** controller ****/
+        /* dead reckoning */
         enc_u = u[0] / m_per_pulse;
         enc_v = u[1] / m_per_pulse;
 
@@ -248,6 +260,7 @@ int main(void){
         );
 
         p_x_cal = x_cal;
+        p_xd = xd;
 
         x_cal[2] = x[2];
         x_cal = x_cal + Jux(x_cal[2]) * del_u;
@@ -255,17 +268,31 @@ int main(void){
         p_enc_u = enc_u;
         p_enc_v = enc_v;
 
-        // control input
-
-        // checkconvergence
+        /* control input calculation */
+        // check convergence and update xd if x_cal converged to xd
         if((xd - x_cal).norm() < eps){
-            if(index_xd < n_xd) xd = xd_arr[index_xd++];
+            if(index_xd < n_xd){
+                if(xd != xd_arr[index_xd]) x_org = xd;
+                xd = xd_arr[index_xd++];
+
+                if((x_org[0] != xd[0])||(x_org[1] != xd[1])){
+                    arg_uv = atan2(xd[1] - x_org[1], xd[0] - x_org[0]);
+                }
+                else arg_uv = 0;
+            }
         }
 
-        e = J(x_cal[2]).inv()*(Kp *(xd - x_cal) - Kd * (x_cal - p_x_cal)*(1 / dt));
+        // PD feedback in uv-coordinate
+        uv = Jux(arg_uv).trans()*(x_cal - xd);
+        duv = Jux(arg_uv).trans()*((x_cal - p_x_cal) - (xd - p_xd))/ dt;
 
-        for(int i = 0;i < 3;i++){
-            if(fabsf(e[i]) > 18) e[i] = std::copysign(18, e[i]);
+        // if(fabsf(uv[0]) > 2) uv[0] = std::copysign(1, uv[0]);
+        input = - Kp * uv - Kd * duv;
+        e = J(x_cal[2]).inv() * Jux(arg_uv) * input;
+
+        float e_max = e.abs().max();
+        if(e_max > max_voltage){
+            for(int i = 0;i < 3;i++) e[i] *= max_voltage / e_max;
         }
 
         fvector<3> diff_e = e - pe;
@@ -278,7 +305,7 @@ int main(void){
         }
         pe = e;
 
-        // end
+        /**** end of calc. for controller ****/
 
         v = rk4<fvector<6>>(v, [=](fvector<6> _v){ return f(_v, e); }, dt);
         u = rk4<fvector<3>>(u, [=](fvector<3> _u){ return du(dx, _u); }, dt);
@@ -286,7 +313,9 @@ int main(void){
         state(v, tau, i, e);
     }
 
+    /* simulation completed */
     printf("calculation finish.\r\n");
+    
 
     FILE *fp = fopen(fname, "w");
     if(!fp){
