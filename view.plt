@@ -58,27 +58,30 @@ array y_obs[7] = [1, 1, 2, 3, 4, 4, 1]
 len = 0.2
 rad = 0.05
 
-set xrange [-1:3]
-set yrange [-1:3]
+set parametric
+set sample 500
+
+set terminal gif animate delay 5 optimize size 500, 500 font 'TimesNewRoman, 12'
+set output "view.gif"
+
+# set terminal qt size 500, 500 font 'TimesNewRoman, 12'
+
+# set xrange [-1:3]
+# set yrange [-1:3]
+set xrange [-2:4]
+set yrange [-1:5]
 set size ratio -1
 
-set parametric
+set lmargin at screen 0.13
+set bmargin at screen 0.12
 
-set xlabel '{/TimesNewRoman:Italic x}-coordinate [m]' font 'TimesNewRoman, 14'
-set ylabel '{/TimesNewRoman:Italic y}-coordinate [m]' font 'TimesNewRoman, 14'
+set xlabel '{/TimesNewRoman:Italic x}-coordinate [m]' offset 0, 0.3
+set ylabel '{/TimesNewRoman:Italic y}-coordinate [m]' offset 1.8, 0
 
-set tics font 'TimesNewRoman, 12'
-set key font 'TimesNewRoman, 14'
+set tics font 'TimesNewRoman, 10'
 
 set grid
 set border lw 1.2
-
-set sample 500
-
-set terminal gif animate delay 5 optimize size 500, 500 transparent #FFFFFFFF
-set output "view.gif"
-
-# set terminal qt size 500, 500
 
 do for [i = 1:N]{
     do for [j = 1:M]{
@@ -97,7 +100,7 @@ do for [i = 1:N]{
         y_tt[(k + 1)*(T + 1)] = y_tt[k*(T + 1) + 1]
     }
 
-    set label 1 at graph 0.7, 0.07 sprintf('time = %4.1f [s]', time[i]) font 'TimesNewRoman, 14'
+    set label 1 at graph 0.7, 0.07 sprintf('time = %4.1f [s]', time[i])
 
     set arrow 1 from x_c[i], y_c[i] to (x_c[i] + len*cos(t_c[i])), (y_c[i] + len*sin(t_c[i])) lw 2 lc 'red'
     set arrow 2 from x_c[i], y_c[i] to (x_c[i] - len*sin(t_c[i])), (y_c[i] + len*cos(t_c[i])) lw 2 lc 'blue'
