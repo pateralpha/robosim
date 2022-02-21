@@ -7,7 +7,7 @@ fb = 'b.dat'
 stats fn nooutput
 
 N = STATS_records
-D = 12
+D = 21
 M = 6
 W = 3
 T = 4
@@ -37,7 +37,7 @@ array y_cnt[Nd + 1]
 # save data to array
 stats fn using (time[$0 + 1] = $1, 0) nooutput
 stats fn using (x_c[$0 + 1] = $2, y_c[$0 + 1] = $3, t_c[$0 + 1] = $4, 0) nooutput
-stats fn using (x_d[$0 + 1] = $5, y_d[$0 + 1] = $6, 0) nooutput
+stats fn using (x_d[$0 + 1] = $8, y_d[$0 + 1] = $9, 0) nooutput
 stats fn using (sum[i = 1:M] (x_m[$0*M + i] = column((i - 1)*2 + D + 1), y_m[$0*M + i] = column((i - 1)*2 + D + 2), 0)) nooutput
 stats fn using (sum[i = 1:(T*W)] (x_t[$0*T*W + i] = column((i - 1)*2 + D + M*2 + 1), y_t[$0*T*W + i] = column((i - 1)*2 + D + M*2 + 2), 0)) nooutput
 

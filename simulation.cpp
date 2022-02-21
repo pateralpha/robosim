@@ -129,7 +129,9 @@ void state(fvector<6> &_x, fvector<3> &_tau, fvector<3> &_i, fvector<3> _e){
     );
 }
 
-constexpr int N = 500;
+constexpr int N = 700;
+constexpr float dt = 0.01;
+constexpr int skip = 5;
 
 struct output{
     float t;
@@ -138,18 +140,27 @@ struct output{
     fvector<3> dx;
 
     fvector<3> xd;
+    fvector<3> dxd;
+
+    fvector<3> x_cal;
+    fvector<3> dx_cal;
 
     fvector<3> e;
     fvector<3> tau;
     fvector<3> i;
 } out_v[N];
 
-output log(float _t, fvector<6> _x, fvector<3> _xd, fvector<3> _e, fvector<3> _tau, fvector<3> _i){
+output log(float _t, fvector<6> _x, fvector<3> _xd, fvector<3> _dxd, 
+        fvector<3> _x_cal, fvector<3> _dx_cal, 
+        fvector<3> _e, fvector<3> _tau, fvector<3> _i){
     output ret;
     ret.t = _t;
     ret.x = upper(_x);
     ret.dx = lower(_x);
     ret.xd = _xd;
+    ret.dxd = _dxd;
+    ret.x_cal = _x_cal;
+    ret.dx_cal = _dx_cal;
     ret.e = _e;
     ret.tau = _tau;
     ret.i = _i;
@@ -194,7 +205,6 @@ int main(void){
         tire_pos[1][k] = Rl * tire_pos[2][k];
     }
 
-    constexpr float dt = 0.01;
     float t = 0;
 
     fvector<6> v;
@@ -208,13 +218,20 @@ int main(void){
     constexpr float max_voltage = 18; // muximum voltage
     constexpr float sat_time = 0.2; // minimum time from 0 V to maximum
     constexpr float de = max_voltage / sat_time * dt;
+    constexpr float ke = 0.009;
 
     constexpr float m_per_pulse = 0.2355e-3;
 
-    auto Kp = diag<3>(1, 5, 2);
-    auto Kd = diag<3>(0.2, 1, 0.4);
+    // auto Kp = diag<3>(1, 5, 2);
+    // auto Kd = diag<3>(0.3, 1.5, 0.6);
+    auto Kp = diag<3>(1, 1, 1);
+    auto Kd = diag<3>(0.3, 0.3, 0.3);
     constexpr float eps = 1;
 
+    constexpr float ddx = 5;
+    constexpr float dx_d_max = 5;
+    constexpr float ddx_slow = 3;
+    constexpr float ddx_buffer = 0.3;
 
     fvector<3> xd_arr[] = {{2, 1, pi/4}, {2, 4, pi/4}, {1, 4, 0}};
     // fvector<3> xd_arr[] = {{3, 4, pi/4}};
@@ -229,6 +246,7 @@ int main(void){
     fvector<3> x_cal, p_x_cal;
 
     fvector<3> x_org = upper(v);
+    fvector<3> dx_cal, p_dx_cal, dx_d, p_dx_d, duv_d, p_duv_d;
     
     fvector<3> uv, duv;
     float arg_uv;
@@ -246,7 +264,7 @@ int main(void){
         x = upper(v);
         dx = lower(v);
 
-        out_v[n] = log(t, v, xd, e, tau, i);
+        out_v[n] = log(t, v, xd, dx_d, x_cal, dx_cal, e, tau, i);
 
         /**** controller ****/
         /* dead reckoning */
@@ -282,13 +300,48 @@ int main(void){
             }
         }
 
-        // PD feedback in uv-coordinate
-        uv = Jux(arg_uv).trans()*(x_cal - xd);
-        duv = Jux(arg_uv).trans()*((x_cal - p_x_cal) - (xd - p_xd))/ dt;
+        p_dx_cal = dx_cal;
+        dx_cal = 0.6 * dx_cal + 0.4 * (x_cal - p_x_cal)/ dt;
 
-        // if(fabsf(uv[0]) > 2) uv[0] = std::copysign(1, uv[0]);
-        input = - Kp * uv - Kd * duv;
-        e = J(x_cal[2]).inv() * Jux(arg_uv) * input;
+        // /* PD feedback in uv-coordinate */
+        // uv = Jux(arg_uv).trans()*(x_cal - xd);
+        // duv = Jux(arg_uv).trans()*((x_cal - p_x_cal) - (xd - p_xd))/ dt;
+
+        // // if(fabsf(uv[0]) > 2) uv[0] = std::copysign(1, uv[0]);
+        // input = - Kp * uv - Kd * duv;
+        // e = J(x_cal[2]).inv() * Jux(arg_uv) * input;
+
+        /* PD feedback in xy-velocity-dimention */
+        uv = Jux(arg_uv).trans()*(x_cal - xd);
+        // if(fabsf(uv[0]) > dx_d_max * dx_d_max /(2 * ddx)) uv[0] = std::copysign(dx_d_max * dx_d_max /(2 * ddx), uv[0]);
+        p_duv_d = duv_d;
+        duv_d = uv.each([](float _v){
+            if(fabsf(_v)< ddx_buffer) return - std::copysign(sqrtf(fabsf(2 * ddx_slow * _v)), _v);
+            else return - std::copysign(sqrtf(fabsf(2 * ddx * (fabsf(_v) - ddx_buffer) + 2 * ddx_slow * ddx_buffer)), _v);
+        });
+
+        duv_d = duv_d.each([](float _f){
+            return fabsf(_f) > dx_d_max ? std::copysign(dx_d_max, _f) : _f;
+        });
+        if(duv_d.norm() > dx_d_max) duv_d *= dx_d_max / duv_d.norm();
+
+
+        p_dx_d = dx_d;
+        dx_d = Jux(arg_uv) * duv_d;
+
+        fvector<3> diff_dx = dx_d - p_dx_d;
+        float dx_max = diff_dx.abs().max();
+
+        for(int i = 0;i < 3;i++){
+            if(diff_dx[i] * dx_d[i] >= 0) diff_dx[i] = ddx * dt * diff_dx[i] / dx_max;
+
+            if(fabsf(p_dx_d[i] - dx_d[i])> fabsf(diff_dx[i])) dx_d[i] = p_dx_d[i] + diff_dx[i];
+        }
+
+        input = ke * 14 * J(x_cal[2]).inv() * dx_d
+                + Kp * J(x_cal[2]).inv()*(dx_d - dx_cal)
+                + Kd * J(x_cal[2]).inv()*((dx_d - p_dx_d)-(dx_cal - p_dx_cal))/ dt;
+        e = input;
 
         float e_max = e.abs().max();
         if(e_max > max_voltage){
@@ -329,12 +382,18 @@ int main(void){
     fvector<3> machine;
     fvector<3> tire;
 
-    constexpr int skip = 5;
+    int cnt = 0;
+    fvector<3> i_ave, i_peak;
 
     for(int n = 0;n < N;n += skip){
         fprintf(fp, "%5.2f %6.3f %6.3f %6.3f ",
                 out_v[n].t, out_v[n].x[0], out_v[n].x[1], out_v[n].x[2]);
+        fprintf(fp, "%6.3f %6.3f %6.3f ",
+                out_v[n].dx[0], out_v[n].dx[1], out_v[n].dx[2]);
         fprintf(fp, "%6.3f %6.3f ", out_v[n].xd[0], out_v[n].xd[1]);
+        fprintf(fp, "%6.3f %6.3f ", out_v[n].dxd[0], out_v[n].dxd[1]);
+        fprintf(fp, "%6.3f %6.3f ", out_v[n].x_cal[0], out_v[n].x_cal[1]);
+        fprintf(fp, "%6.3f %6.3f ", out_v[n].dx_cal[0], out_v[n].dx_cal[1]);
         fprintf(fp, "%6.2f %6.2f %6.2f ", out_v[n].e[0], out_v[n].e[1], out_v[n].e[2]);
         fprintf(fp, "%6.2f %6.2f %6.2f ", out_v[n].i[0], out_v[n].i[1], out_v[n].i[2]);
 
@@ -347,9 +406,19 @@ int main(void){
             fprintf(fp, "%6.3f %6.3f ", tire[0], tire[1]);
         }
         fprintf(fp, "\r\n");
+
+        cnt++;
+        i_ave += out_v[n].i.abs();
+        i_peak += (out_v[n].i.abs() - i_peak).each([](float _f){ return _f > 0 ? _f : 0; });
     }
 
     fclose(fp);
+
+    i_ave /= cnt;
+    printf("i_ave: %6.2f \r\n", i_ave.mean());
+    i_ave.print();
+    printf("i_peak: \r\n");
+    i_peak.print();
 
     fp = fopen(fname2, "w");
     if(!fp){

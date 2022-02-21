@@ -126,6 +126,17 @@ struct fvector : public array<float, N>{
         return sqrtf(quad);
     }
 
+    const float mean(void) const{
+        float sum = 0;
+        for(float v : *this) sum += v;
+        return sum / N;
+    }
+
+    const fvector<N> each(std::function<float(float)> f) const{
+        fvector<N> v;
+        for_range(i, N) v[i] = f((*this)[i]);
+        return v;
+    }
 
 };
 
@@ -375,6 +386,11 @@ const fvector<N> operator *(const float _a, const fvector<N> &_v){
     return v *= _a;
 }
 
+template <std::size_t N, std::size_t M>
+const fmatrix<N, M> operator *(const float _a, const fmatrix<N, M> &_m){
+    fmatrix<N, M> m = _m;
+    return m *= _a;
+}
 
 template <std::size_t N, std::size_t M>
 const fmatrix<N, M> zeros(void) { return fmatrix<N, M>(0); }
