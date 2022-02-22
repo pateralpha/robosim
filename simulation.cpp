@@ -133,6 +133,21 @@ constexpr int N = 700;
 constexpr float dt = 0.01;
 constexpr int skip = 5;
 
+// #define POS_PD
+// #define VEL_PD
+#define PURE_PURSUIT
+
+#ifdef POS_PD
+    auto Kp = diag<3>(1, 5, 2);
+    auto Kd = diag<3>(0.3, 1.5, 0.6);
+#elif defined VEL_PD
+    auto Kp = diag<3>(1, 1, 1);
+    auto Kd = diag<3>(0.3, 0.3, 0.3);
+#elif defined PURE_PURSUIT
+    auto Kp = diag<3>(1, 5, 2);
+    auto Kd = diag<3>(0.3, 1.5, 0.6);
+#endif
+
 struct output{
     float t;
 
@@ -222,19 +237,29 @@ int main(void){
 
     constexpr float m_per_pulse = 0.2355e-3;
 
-    // auto Kp = diag<3>(1, 5, 2);
-    // auto Kd = diag<3>(0.3, 1.5, 0.6);
-    auto Kp = diag<3>(1, 1, 1);
-    auto Kd = diag<3>(0.3, 0.3, 0.3);
+
     constexpr float eps = 1;
 
-    constexpr float ddx = 5;
+    constexpr float ddx = 3;
     constexpr float dx_d_max = 5;
     constexpr float ddx_slow = 3;
     constexpr float ddx_buffer = 0.3;
 
-    fvector<3> xd_arr[] = {{2, 1, pi/4}, {2, 4, pi/4}, {1, 4, 0}};
+    // fvector<3> xd_arr[] = {{2, 1, pi/4}, {2, 4, pi/4}, {1, 4, 0}};
     // fvector<3> xd_arr[] = {{3, 4, pi/4}};
+    fvector<3> xd_arr[] = {
+        {0.5, 0.15, pi/4},
+        {1, 0.4, pi/4},
+        {1.5, 0.75, pi/4},
+        {2, 1.2, pi/4},
+        {2.2, 1.5, pi/4},
+        {2.3, 2, pi/4},
+        {2.3, 2.5, pi/4},
+        {2.2, 3, pi/4},
+        {2, 3.3, pi/4},
+        {1.5, 3.7, pi/4},
+        {1, 4, 0},
+    };
     int n_xd = sizeof(xd_arr) / sizeof(xd_arr[0]);
     fvector<3> xd = xd_arr[0], p_xd;
 
@@ -247,6 +272,9 @@ int main(void){
 
     fvector<3> x_org = upper(v);
     fvector<3> dx_cal, p_dx_cal, dx_d, p_dx_d, duv_d, p_duv_d;
+
+    fvector<3> xd_tmp, p_xd_tmp;
+    float vel = 0;
     
     fvector<3> uv, duv;
     float arg_uv;
@@ -264,7 +292,11 @@ int main(void){
         x = upper(v);
         dx = lower(v);
 
+#ifndef PURE_PURSUIT
         out_v[n] = log(t, v, xd, dx_d, x_cal, dx_cal, e, tau, i);
+#else
+        out_v[n] = log(t, v, xd_tmp, dx_d, x_cal, dx_cal, e, tau, i);
+#endif
 
         /**** controller ****/
         /* dead reckoning */
@@ -287,6 +319,7 @@ int main(void){
         p_enc_v = enc_v;
 
         /* control input calculation */
+#ifndef PURE_PURSUIT
         // check convergence and update xd if x_cal converged to xd
         if((xd - x_cal).norm() < eps){
             if(index_xd < n_xd){
@@ -299,18 +332,21 @@ int main(void){
                 else arg_uv = 0;
             }
         }
+#endif
 
         p_dx_cal = dx_cal;
         dx_cal = 0.6 * dx_cal + 0.4 * (x_cal - p_x_cal)/ dt;
 
-        // /* PD feedback in uv-coordinate */
-        // uv = Jux(arg_uv).trans()*(x_cal - xd);
-        // duv = Jux(arg_uv).trans()*((x_cal - p_x_cal) - (xd - p_xd))/ dt;
+#ifdef POS_PD
+        /* PD feedback in uv-coordinate */
+        uv = Jux(arg_uv).trans()*(x_cal - xd);
+        duv = Jux(arg_uv).trans()*((x_cal - p_x_cal) - (xd - p_xd))/ dt;
 
-        // // if(fabsf(uv[0]) > 2) uv[0] = std::copysign(1, uv[0]);
-        // input = - Kp * uv - Kd * duv;
-        // e = J(x_cal[2]).inv() * Jux(arg_uv) * input;
+        // if(fabsf(uv[0]) > 2) uv[0] = std::copysign(1, uv[0]);
+        input = - Kp * uv - Kd * duv;
+        e = J(x_cal[2]).inv() * Jux(arg_uv) * input;
 
+#elif defined VEL_PD
         /* PD feedback in xy-velocity-dimention */
         uv = Jux(arg_uv).trans()*(x_cal - xd);
         // if(fabsf(uv[0]) > dx_d_max * dx_d_max /(2 * ddx)) uv[0] = std::copysign(dx_d_max * dx_d_max /(2 * ddx), uv[0]);
@@ -342,6 +378,52 @@ int main(void){
                 + Kp * J(x_cal[2]).inv()*(dx_d - dx_cal)
                 + Kd * J(x_cal[2]).inv()*((dx_d - p_dx_d)-(dx_cal - p_dx_cal))/ dt;
         e = input;
+
+#elif defined PURE_PURSUIT
+
+        float dist = (xd - xd_tmp).norm();
+        for(int k = index_xd;k < n_xd;k++){
+            dist += (xd_arr[k] - xd_arr[k - 1]).norm();
+        }
+        vel = std::min(sqrtf(2 * ddx * fabsf(dist)), vel + ddx * dt);
+        if(vel > dx_d_max) vel = dx_d_max;
+
+        float remain;
+        fvector<3> p_xd_remain = xd_tmp;
+
+        p_xd_tmp = xd_tmp;
+        xd_tmp += (xd - xd_tmp)/(xd - xd_tmp).norm()* vel * dt;
+        while((p_xd_remain - xd)*(xd_tmp - xd)< 0){
+            if(index_xd >= n_xd) break;
+
+            remain = (xd_tmp - xd).norm();
+            p_xd_remain = xd_tmp;
+            xd_tmp = xd;
+
+            if(xd != xd_arr[index_xd]) x_org = xd;
+
+            xd = xd_arr[index_xd++];
+            xd_tmp += (xd - xd_tmp)/(xd - xd_tmp).norm()* remain;
+
+            if((x_org[0] != xd[0])||(x_org[1] != xd[1])){
+                arg_uv = atan2(xd[1] - x_org[1], xd[0] - x_org[0]);
+            }
+            else arg_uv = 0;
+        }
+        dx_d = (xd_tmp - p_xd_tmp)/ dt;
+
+        uv = Jux(arg_uv).trans()*(x_cal - xd_tmp);
+        duv = Jux(arg_uv).trans()*(dx_cal - dx_d);
+
+        // if(fabsf(uv[0]) > 2) uv[0] = std::copysign(1, uv[0]);
+        input = - Kp * uv - Kd * duv;
+        e = J(x_cal[2]).inv() * Jux(arg_uv) * input;
+
+        // input = Kp *(xd_tmp - x_cal) + Kd *(dx_d - dx_cal);
+        // e = J(x_cal[2]).inv() * input;
+
+
+#endif
 
         float e_max = e.abs().max();
         if(e_max > max_voltage){
@@ -414,11 +496,11 @@ int main(void){
 
     fclose(fp);
 
-    i_ave /= cnt;
-    printf("i_ave: %6.2f \r\n", i_ave.mean());
-    i_ave.print();
-    printf("i_peak: \r\n");
-    i_peak.print();
+    // i_ave /= cnt;
+    // printf("i_ave: %6.2f \r\n", i_ave.mean());
+    // i_ave.print();
+    // printf("i_peak: \r\n");
+    // i_peak.print();
 
     fp = fopen(fname2, "w");
     if(!fp){
