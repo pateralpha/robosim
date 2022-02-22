@@ -137,6 +137,7 @@ struct xd_t{
     } type;
 
     fvector<5> arc;
+    float v_m, v_e;
 
     operator fvector<3> &() { return xd; }
     void print(void) const{
@@ -149,8 +150,8 @@ constexpr int N = 700;
 constexpr float dt = 0.01;
 constexpr int skip = 5;
 
-#define POS_PD
-// #define VEL_PD
+// #define POS_PD
+#define VEL_PD
 // #define PURE_PURSUIT
 
 #ifdef POS_PD
@@ -256,9 +257,9 @@ int main(void){
 
     constexpr float eps = 0.5;
 
-    constexpr float ddx = 3;
+    constexpr float ddx = 5;
     constexpr float dx_d_max = 5;
-    constexpr float ddx_slow = 3;
+    constexpr float ddx_slow = 2;
     constexpr float ddx_buffer = 0.3;
 
     // fvector<3> xd_arr[] = {{2, 1, pi/4}, {2, 4, pi/4}, {1, 4, 0}};
@@ -280,11 +281,11 @@ int main(void){
     // fvector<3> xd = xd_arr[0], p_xd;
 
     xd_t xdc_arr[] = {
-        {{0.5, 0, 0}, xd_t::Line, {}},
-        {{2, 1.5, 0}, xd_t::Arc, {0.5, 1.5, 1.5, -1.57, 0}},
-        {{2, 2.5, 0}, xd_t::Line, {}},
-        {{1.65, 3.35, 0}, xd_t::Arc, {0.79, 2.5, 1.21, 0, 1.57}},
-        {{1, 4, 0}, xd_t::Line, {}},
+        {{0.5, 0, 0}, xd_t::Line, {}, 5, 5},
+        {{2, 1.5, 0}, xd_t::Arc, {0.5, 1.5, 1.5, -1.57, 0}, 5, 5},
+        {{2, 2.5, 0}, xd_t::Line, {}, 5, 3},
+        {{1.65, 3.35, 0}, xd_t::Arc, {0.79, 2.5, 1.21, 0, 1.57}, 3, 3},
+        {{1, 4, 0}, xd_t::Line, {}, 5, 0},
     };
     int n_xd = sizeof(xdc_arr) / sizeof(xdc_arr[0]);
     fvector<3> xd = xdc_arr[0].xd, p_xd;
@@ -292,6 +293,7 @@ int main(void){
     int type = xdc_arr[0].type;
     fvector<5> xd_arc = xdc_arr[0].arc;
     float arc_dir = xdc_arr[0].arc[4] > xdc_arr[0].arc[3] ? -1 : 1;
+    float vm = xdc_arr[0].v_m, ve = xdc_arr[0].v_e;
     
 
     int index_xd = 1;
@@ -305,6 +307,7 @@ int main(void){
     fvector<3> dx_cal, p_dx_cal, dx_d, p_dx_d, duv_d, p_duv_d;
 
     fvector<3> xd_tmp, p_xd_tmp;
+    float arg = xd_arc[3];
     float vel = 0;
     
     fvector<3> uv, duv;
@@ -364,7 +367,10 @@ int main(void){
                 
                 type = xdc_arr[index_xd].type;
                 xd_arc = xdc_arr[index_xd].arc;
+                vm = xdc_arr[index_xd].v_m;
+                ve = xdc_arr[index_xd].v_e;
                 xd = xdc_arr[index_xd++].xd;
+                if(ve > dx_d_max) ve = dx_d_max;
 
                 if((x_org[0] != xd[0])||(x_org[1] != xd[1])){
                     arg_uv = atan2(xd[1] - x_org[1], xd[0] - x_org[0]);
@@ -398,13 +404,10 @@ int main(void){
             while(x_t_diff < -pi)x_t_diff += 2*pi;
             uv = fvector<3>{xd_arc[2]*(x_t_diff), arc_dir*(x_cal_pol[0] - xd_arc[2]), x_cal[2] - xd[2]};
             uv[1] += arc_dir *(Jux(arg_uv).trans()* dx_cal * dt)[0]/ xd_arc[2];
-            printf("%6.2f \r\n", arg_uv);
+            // printf("%6.2f \r\n", arg_uv);
             // (Jux(arg_uv).trans()*dx_cal).print();
             duv = Jux(arg_uv).trans()*(dx_cal - (xd - p_xd)/ dt);
-            duv.print();
-            duv[1] += arc_dir * 5 *((Jux(arg_uv).trans()*dx_cal)[0] * (Jux(arg_uv).trans()*dx_cal)[0] * dt)/ xd_arc[2];
-
-            duv.print();
+            duv[1] += arc_dir * 3 *((Jux(arg_uv).trans()*dx_cal)[0] * (Jux(arg_uv).trans()*dx_cal)[0] * dt)/ xd_arc[2];
         }
 
         // if(fabsf(uv[0]) > 2) uv[0] = std::copysign(1, uv[0]);
@@ -413,22 +416,51 @@ int main(void){
 
 #elif defined VEL_PD
         /* PD feedback in xy-velocity-dimention */
-        uv = Jux(arg_uv).trans()*(x_cal - xd);
-        // if(fabsf(uv[0]) > dx_d_max * dx_d_max /(2 * ddx)) uv[0] = std::copysign(dx_d_max * dx_d_max /(2 * ddx), uv[0]);
+        float dist = (Jux(arg_uv).trans()*(x_cal - xd)).abs()[0];
+        for(int k = index_xd;k < n_xd;k++){
+            if(xdc_arr[k].type == xd_t::Line){
+                dist += (xdc_arr[k].xd - xdc_arr[k - 1].xd).norm();
+            }
+            else {
+                dist += xdc_arr[k].arc[2] *(xdc_arr[k].arc[4] - xdc_arr[k - 1].arc[3]);
+            }
+        }
+
+        if(type == xd_t::Line || (xd - x_cal).norm() < 0.1){
+            uv = Jux(arg_uv).trans()*(x_cal - xd);
+        }
+        else {
+            float x_t_diff = x_cal_pol[1] - xd_arc[4];
+            while(x_t_diff > pi)x_t_diff -= 2*pi;
+            while(x_t_diff < -pi)x_t_diff += 2*pi;
+            uv = fvector<3>{xd_arc[2]*(x_t_diff), arc_dir*(x_cal_pol[0] - xd_arc[2]), x_cal[2] - xd[2]};
+            // uv[1] += arc_dir *(Jux(arg_uv).trans()* dx_cal * dt)[0]/ xd_arc[2];
+        }
         p_duv_d = duv_d;
-        duv_d = uv.each([](float _v){
-            if(fabsf(_v)< ddx_buffer) return - std::copysign(sqrtf(fabsf(2 * ddx_slow * _v)), _v);
-            else return - std::copysign(sqrtf(fabsf(2 * ddx * (fabsf(_v) - ddx_buffer) + 2 * ddx_slow * ddx_buffer)), _v);
-        });
 
-        duv_d = duv_d.each([](float _f){
-            return fabsf(_f) > dx_d_max ? std::copysign(dx_d_max, _f) : _f;
-        });
-        if(duv_d.norm() > dx_d_max) duv_d *= dx_d_max / duv_d.norm();
+        if(fabsf(uv[0]) < ddx_buffer) duv_d[0] = - std::copysign(sqrtf(2 * ddx_slow * fabsf(uv[0]) + ve * ve), uv[0]);
+        else duv_d[0] = - std::copysign(sqrtf(fabsf(2 * ddx * (fabsf(uv[0]) - ddx_buffer) + 2 * ddx_slow * ddx_buffer + ve * ve)), uv[0]);
+        if(fabsf(uv[1])< ddx_buffer) duv_d[1] = - std::copysign(sqrtf(fabsf(2 * ddx_slow * uv[1])), uv[1]);
+        else duv_d[1] = - std::copysign(sqrtf(fabsf(2 * ddx * (fabsf(uv[1]) - ddx_buffer) + 2 * ddx_slow * ddx_buffer)), uv[1]);
+        duv_d[2] = - std::copysign(sqrtf(fabsf(2 * ddx_slow * uv[2])), uv[2]);
 
+        duv_d = duv_d.each([=](float _f){
+            return fabsf(_f) > vm ? std::copysign(vm, _f) : _f;
+        });
+        if(duv_d.norm() > vm) duv_d *= vm / duv_d.norm();
+
+        vel = dx_cal.norm();
 
         p_dx_d = dx_d;
         dx_d = Jux(arg_uv) * duv_d;
+
+        fvector<3> del_xa;
+        
+        if(type == xd_t::Arc && dist > 0.1){
+            dx_d += arc_dir * vel * vel * dt * fvector<3>{cosf(arg_uv), sinf(arg_uv), 0};
+            del_xa = {- sinf(arg_uv), cosf(arg_uv), 0};
+            del_xa *= - arc_dir * vel * vel / xd_arc[2];
+        }
 
         fvector<3> diff_dx = dx_d - p_dx_d;
         float dx_max = diff_dx.abs().max();
@@ -441,14 +473,19 @@ int main(void){
 
         input = ke * 14 * J(x_cal[2]).inv() * dx_d
                 + Kp * J(x_cal[2]).inv()*(dx_d - dx_cal)
-                + Kd * J(x_cal[2]).inv()*((dx_d - p_dx_d)-(dx_cal - p_dx_cal))/ dt;
+                + Kd * J(x_cal[2]).inv()*(((dx_d - p_dx_d)-(dx_cal - p_dx_cal))/ dt + del_xa);
         e = input;
 
 #elif defined PURE_PURSUIT
 
         float dist = (xd - xd_tmp).norm();
         for(int k = index_xd;k < n_xd;k++){
-            dist += (xd_arr[k] - xd_arr[k - 1]).norm();
+            if(xdc_arr[k].type == xd_t::Line){
+                dist += (xdc_arr[k].xd - xdc_arr[k - 1].xd).norm();
+            }
+            else {
+                dist += xdc_arr[k].arc[2] *(xdc_arr[k].arc[4] - xdc_arr[k - 1].arc[3]);
+            }
         }
         vel = std::min(sqrtf(2 * ddx * fabsf(dist)), vel + ddx * dt);
         if(vel > dx_d_max) vel = dx_d_max;
@@ -457,7 +494,17 @@ int main(void){
         fvector<3> p_xd_remain = xd_tmp;
 
         p_xd_tmp = xd_tmp;
-        xd_tmp += (xd - xd_tmp)/(xd - xd_tmp).norm()* vel * dt;
+        if(type == xd_t::Line){
+            xd_tmp += (xd - xd_tmp)/(xd - xd_tmp).norm()* vel * dt;
+        }
+        else {
+            arg += std::copysign(vel * dt / xd_arc[2], (xd_arc[4] - xd_arc[3]));
+            xd_tmp = fvector<3>{xd_arc[0], xd_arc[1], 0} + xd_arc[2] * fvector<3>{cosf(arg), sinf(arg), 0};
+
+            // printf("%5.2f\r\n", arg);
+            // xd_tmp.print();
+        }
+
         while((p_xd_remain - xd)*(xd_tmp - xd)< 0){
             if(index_xd >= n_xd) break;
 
@@ -465,17 +512,20 @@ int main(void){
             p_xd_remain = xd_tmp;
             xd_tmp = xd;
 
-            if(xd != xd_arr[index_xd]) x_org = xd;
-
-            xd = xd_arr[index_xd++];
+            type = xdc_arr[index_xd].type;
+            xd_arc = xdc_arr[index_xd].arc;
+            xd = xdc_arr[index_xd++].xd;
+            arg = xd_arc[3];
             xd_tmp += (xd - xd_tmp)/(xd - xd_tmp).norm()* remain;
-
-            if((x_org[0] != xd[0])||(x_org[1] != xd[1])){
-                arg_uv = atan2(xd[1] - x_org[1], xd[0] - x_org[0]);
-            }
-            else arg_uv = 0;
         }
         dx_d = (xd_tmp - p_xd_tmp)/ dt;
+
+        if(p_xd_tmp != x_org) x_org = p_xd_tmp;
+
+        if((x_org[0] != p_xd_tmp[0])||(x_org[1] != p_xd_tmp[1])){
+            arg_uv = atan2(p_xd_tmp[1] - x_org[1], p_xd_tmp[0] - x_org[0]);
+        }
+        else arg_uv = 0;
 
         uv = Jux(arg_uv).trans()*(x_cal - xd_tmp);
         duv = Jux(arg_uv).trans()*(dx_cal - dx_d);
