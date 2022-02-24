@@ -8,11 +8,44 @@
 #include <limits>
 
 #include "la.h"
+#include "circle.h"
 
 using std::array;
 
 constexpr float th_omega = 1e-2; // threshold value for determining stop or not
 constexpr float inertia_of_cylinder(float _m, float _a){ return (_m * _a * _a)/ 2; }
+
+
+template <std::size_t N>
+inline fvector<N + 1> merge_v(float _f, fvector<N> _v){
+    fvector<N + 1> ret;
+    ret[0] = _f;
+    for(int i = 1;i <= N;i++) ret[i] = _v[i];
+    return ret;
+}
+
+template <std::size_t N>
+inline fvector<N + 1> merge_v(fvector<N> _v, float _f){
+    fvector<N + 1> ret;
+    for(int i = 0;i < N;i++) ret[i] = _v[i];
+    ret[N] = _f;
+    return ret;
+}
+
+template <std::size_t N, std::size_t M>
+inline fvector<N + M> merge_v(fvector<N> _v1, fvector<M> _v2){
+    fvector<N + 1> ret;
+    for(int i = 0;i < N;i++) ret[i] = _v1[i];
+    for(int i = N;i < N + M;i++) ret[i] = _v2[i];
+    return ret;
+}
+
+template <std::size_t N, std::size_t M>
+inline fvector<M> top_v(fvector<N> _v){
+    fvector<M> ret;
+    for(int i = 0;i < N && i < M;i++) ret[i] = _v[i];
+    return ret;
+}
 
 class wheel{
 public:
@@ -129,22 +162,6 @@ void state(fvector<6> &_x, fvector<3> &_tau, fvector<3> &_i, fvector<3> _e){
     );
 }
 
-struct xd_t{
-    fvector<3> xd;
-    enum type_t{
-        Line,
-        Arc,
-    } type;
-
-    fvector<5> arc;
-    float v_m, v_e;
-
-    operator fvector<3> &() { return xd; }
-    void print(void) const{
-        xd.print();
-        if(this->type == Arc) arc.print();
-    }
-};
 
 constexpr int N = 700;
 constexpr float dt = 0.01;
@@ -159,7 +176,7 @@ constexpr int skip = 5;
     auto Kd = diag<3>(0.3, 1.5, 0.6);
 #elif defined VEL_PD
     auto Kp = diag<3>(1, 1, 1);
-    auto Kd = diag<3>(0.3, 0.3, 0.3);
+    auto Kd = diag<3>(0.4, 0.4, 0.4);
 #elif defined PURE_PURSUIT
     auto Kp = diag<3>(1, 5, 2);
     auto Kd = diag<3>(0.3, 1.5, 0.6);
@@ -213,6 +230,7 @@ int main(void){
 
     char fname[] = "a.dat";
     char fname2[] = "b.dat";
+    char fname3[] = "c.dat";
 
     fvector<3> machine_pos[6];
     fvector<3> tire_pos[3][4];
@@ -255,39 +273,73 @@ int main(void){
     constexpr float m_per_pulse = 0.2355e-3;
 
 
-    constexpr float eps = 0.5;
+    constexpr float eps = 0;
 
     constexpr float ddx = 5;
     constexpr float dx_d_max = 5;
-    constexpr float ddx_slow = 2;
+    constexpr float ddx_slow = 3;
     constexpr float ddx_buffer = 0.3;
+    constexpr float ddx_rel = ddx * 1.2;
 
-    // fvector<3> xd_arr[] = {{2, 1, pi/4}, {2, 4, pi/4}, {1, 4, 0}};
-    // fvector<3> xd_arr[] = {{3, 4, pi/4}};
-    fvector<3> xd_arr[] = {
-        {0.5, 0.15, pi/4},
-        {1, 0.4, pi/4},
-        {1.5, 0.75, pi/4},
-        {2, 1.2, pi/4},
-        {2.2, 1.5, pi/4},
-        {2.3, 2, pi/4},
-        {2.3, 2.5, pi/4},
-        {2.2, 3, pi/4},
-        {2, 3.3, pi/4},
-        {1.5, 3.7, pi/4},
-        {1, 4, 0},
-    };
-    // int n_xd = sizeof(xd_arr) / sizeof(xd_arr[0]);
-    // fvector<3> xd = xd_arr[0], p_xd;
+    float ddw_rel = (J(0).inv()* fvector<3>{1, 0, 0} * ddx_rel).abs().max();
 
-    xd_t xdc_arr[] = {
-        {{0.5, 0, 0}, xd_t::Line, {}, 5, 5},
-        {{2, 1.5, 0}, xd_t::Arc, {0.5, 1.5, 1.5, -1.57, 0}, 5, 5},
-        {{2, 2.5, 0}, xd_t::Line, {}, 5, 3},
-        {{1.65, 3.35, 0}, xd_t::Arc, {0.79, 2.5, 1.21, 0, 1.57}, 3, 3},
-        {{1, 4, 0}, xd_t::Line, {}, 5, 0},
+    // std::vector<fvector<3>> xd_vec = {
+    //     {0, 0, 0},
+    //     {2, 1, pi/4},
+    //     {2, 4, pi/4},
+    //     {1, 4, 0},
+    // };
+
+    // std::vector<fvector<3>> xd_vec = {
+    //     {0, 0, 0}.
+    //     {0.5, 0.15, pi/4},
+    //     {1, 0.4, pi/4},
+    //     {1.5, 0.75, pi/4},
+    //     {2, 1.2, pi/4},
+    //     {2.2, 1.5, pi/4},
+    //     {2.3, 2, pi/4},
+    //     {2.3, 2.5, pi/4},
+    //     {2.2, 3, pi/4},
+    //     {2, 3.3, pi/4},
+    //     {1.5, 3.7, pi/4},
+    //     {1, 4, 0},
+    // };
+
+    std::vector<fvector<4>> xd_vec = {
+        {0, 0, 0, 0},
+        {2, 1.5, 0, pi/2},
+        {2, 2.5, 0, pi/2},
+        {1, 4, 0, 3*pi/4}
     };
-    int n_xd = sizeof(xdc_arr) / sizeof(xdc_arr[0]);
+
+    // std::vector<fvector<4>> xd_vec = {
+    //     {0, 0, 0, 0},
+    //     {2, 1, pi/4, pi/2},
+    //     {2, 2.5, pi/4, pi/2},
+    //     {1, 4, 0, 3*pi/4}
+    // };
+
+    // std::vector<fvector<4>> xd_vec = {
+    //     {0, 0, 0, 0},
+    //     {1, 0, 0, 0},
+    //     {3, 2, 0, pi/2},
+    //     {1, 4, 0, pi},
+    //     {-1, 2, 0, -pi/2},
+    //     {1, 0, 0, 0}
+    // };
+
+    std::vector<xd_t> xdc_arr;
+
+    int n_xd = make_trj(xd_vec, xdc_arr);
+    printf("Control point maked:: %d\r\n", n_xd);
+
+    for(auto &v : xdc_arr){
+        v.v_m = dx_d_max;
+        v.v_e = dx_d_max;
+        v.xd.print();
+    }
+    (xdc_arr.end() - 1)->v_e = 0;
+
     fvector<3> xd = xdc_arr[0].xd, p_xd;
 
     int type = xdc_arr[0].type;
@@ -304,10 +356,12 @@ int main(void){
     fvector<3> x_cal, p_x_cal;
 
     fvector<3> x_org = upper(v);
-    fvector<3> dx_cal, p_dx_cal, dx_d, p_dx_d, duv_d, p_duv_d;
+    fvector<3> dx_cal, p_dx_cal, dx_d, p_dx_d, duv_d, dw_d, p_dw_d;
+    fvector<3> delta_dx_d;
 
-    fvector<3> xd_tmp, p_xd_tmp;
+    fvector<2> xd_tmp, p_xd_tmp;
     float arg = xd_arc[3];
+    float vel_tmp = 0;
     float vel = 0;
     
     fvector<3> uv, duv;
@@ -323,8 +377,19 @@ int main(void){
     }
     else arg_uv = 0;
 
+    if(index_xd < n_xd){
+        if(xdc_arr[index_xd].type == xd_t::Arc){
+            ve = std::min(sqrtf(xdc_arr[index_xd].arc[2] * ddx), ve);
+        }
+    }
+
+    bool over = false;
+
     fvector<3> input;
     fvector<2> x_cal_pol;
+
+
+
 
     /* simulation for loop starts here */
     for(int n = 0;n < N;n++, t += dt){
@@ -335,7 +400,7 @@ int main(void){
 #ifndef PURE_PURSUIT
         out_v[n] = log(t, v, xd, dx_d, x_cal, dx_cal, e, tau, i);
 #else
-        out_v[n] = log(t, v, xd_tmp, dx_d, x_cal, dx_cal, e, tau, i);
+        out_v[n] = log(t, v, fvector<3>{xd_tmp[0], xd_tmp[1], xd[2]}, dx_d, x_cal, dx_cal, e, tau, i);
 #endif
 
         /**** controller ****/
@@ -358,10 +423,15 @@ int main(void){
         p_enc_u = enc_u;
         p_enc_v = enc_v;
 
+        
+        p_dx_cal = dx_cal;
+        dx_cal = 0.6 * dx_cal + 0.4 * (x_cal - p_x_cal)/ dt;
+
         /* control input calculation */
-#ifndef PURE_PURSUIT
         // check convergence and update xd if x_cal converged to xd
-        if((xd - x_cal).norm() < eps){
+        if((xd - x_cal).norm() < eps || over){
+
+            over = false;
             if(index_xd < n_xd){
                 if(xd != xdc_arr[index_xd].xd) x_org = xd;
                 
@@ -370,7 +440,20 @@ int main(void){
                 vm = xdc_arr[index_xd].v_m;
                 ve = xdc_arr[index_xd].v_e;
                 xd = xdc_arr[index_xd++].xd;
+                if(vm > dx_d_max) vm = dx_d_max;
                 if(ve > dx_d_max) ve = dx_d_max;
+
+                arg = xd_arc[3];
+
+                if(type == xd_t::Arc){
+                    vm = sqrtf(xd_arc[2] * ddx);
+                }
+
+                if(index_xd < n_xd){
+                    if(xdc_arr[index_xd].type == xd_t::Arc){
+                        ve = std::min(sqrtf(xdc_arr[index_xd].arc[2] * ddx), ve);
+                    }
+                }
 
                 if((x_org[0] != xd[0])||(x_org[1] != xd[1])){
                     arg_uv = atan2(xd[1] - x_org[1], xd[0] - x_org[0]);
@@ -378,6 +461,7 @@ int main(void){
                 else arg_uv = 0;
             }
         }
+
         if(type == xd_t::Arc){
             fvector<2> xd_arc_org = {xd_arc[0], xd_arc[1]};
             fvector<2> x_cal_tmp = fvector<2>{x_cal[0], x_cal[1]} - xd_arc_org;
@@ -387,14 +471,10 @@ int main(void){
             while(arg_uv > pi)arg_uv -= 2*pi;
             while(arg_uv < -pi)arg_uv += 2*pi;
         }
-#endif
+        else arc_dir = - 1;
 
-        p_dx_cal = dx_cal;
-        dx_cal = 0.6 * dx_cal + 0.4 * (x_cal - p_x_cal)/ dt;
-
-#ifdef POS_PD
-        /* PD feedback in uv-coordinate */
-        if(type == xd_t::Line || (xd - x_cal).norm() < 0.1){
+        if(type == xd_t::Line){
+        // || (xd - x_cal).norm() < 0.1){
             uv = Jux(arg_uv).trans()*(x_cal - xd);
             duv = Jux(arg_uv).trans()*(dx_cal - (xd - p_xd)/ dt);
         }
@@ -403,139 +483,100 @@ int main(void){
             while(x_t_diff > pi)x_t_diff -= 2*pi;
             while(x_t_diff < -pi)x_t_diff += 2*pi;
             uv = fvector<3>{xd_arc[2]*(x_t_diff), arc_dir*(x_cal_pol[0] - xd_arc[2]), x_cal[2] - xd[2]};
-            uv[1] += arc_dir *(Jux(arg_uv).trans()* dx_cal * dt)[0]/ xd_arc[2];
-            // printf("%6.2f \r\n", arg_uv);
-            // (Jux(arg_uv).trans()*dx_cal).print();
             duv = Jux(arg_uv).trans()*(dx_cal - (xd - p_xd)/ dt);
-            duv[1] += arc_dir * 3 *((Jux(arg_uv).trans()*dx_cal)[0] * (Jux(arg_uv).trans()*dx_cal)[0] * dt)/ xd_arc[2];
         }
 
-        // if(fabsf(uv[0]) > 2) uv[0] = std::copysign(1, uv[0]);
+        float dist;
+
+        if(type == xd_t::Line){
+            dist = (Jux(arg_uv).trans()*(merge_v(xd_tmp, 0) - xd)).abs()[0];
+        }
+        else {
+            float x_t_diff = arg - xd_arc[4];
+            dist = fabsf(xd_arc[2]*x_t_diff);
+        }
+
+        // vel = (Jux(arg_uv).trans()* dx_cal)[0];
+        // if(type == xd_t::Arc){
+        //     delta_dx_d = - arc_dir * vel * vel * dt * fvector<3>{- sinf(arg_uv), cosf(arg_uv), 0} / xd_arc[2];
+        // }
+        // else delta_dx_d = {0, 0, 0};
+
+#ifdef POS_PD
+        /* PD feedback in uv-coordinate */
+        duv += Jux(arg_uv).trans() * delta_dx_d;
+
         input = - Kp * uv - Kd * duv;
         e = J(x_cal[2]).inv() * Jux(arg_uv) * input;
 
 #elif defined VEL_PD
-        /* PD feedback in xy-velocity-dimention */
-        float dist = (Jux(arg_uv).trans()*(x_cal - xd)).abs()[0];
-        for(int k = index_xd;k < n_xd;k++){
-            if(xdc_arr[k].type == xd_t::Line){
-                dist += (xdc_arr[k].xd - xdc_arr[k - 1].xd).norm();
-            }
-            else {
-                dist += xdc_arr[k].arc[2] *(xdc_arr[k].arc[4] - xdc_arr[k - 1].arc[3]);
-            }
-        }
 
-        if(type == xd_t::Line || (xd - x_cal).norm() < 0.1){
-            uv = Jux(arg_uv).trans()*(x_cal - xd);
-        }
-        else {
-            float x_t_diff = x_cal_pol[1] - xd_arc[4];
-            while(x_t_diff > pi)x_t_diff -= 2*pi;
-            while(x_t_diff < -pi)x_t_diff += 2*pi;
-            uv = fvector<3>{xd_arc[2]*(x_t_diff), arc_dir*(x_cal_pol[0] - xd_arc[2]), x_cal[2] - xd[2]};
-            // uv[1] += arc_dir *(Jux(arg_uv).trans()* dx_cal * dt)[0]/ xd_arc[2];
-        }
-        p_duv_d = duv_d;
-
-        if(fabsf(uv[0]) < ddx_buffer) duv_d[0] = - std::copysign(sqrtf(2 * ddx_slow * fabsf(uv[0]) + ve * ve), uv[0]);
-        else duv_d[0] = - std::copysign(sqrtf(fabsf(2 * ddx * (fabsf(uv[0]) - ddx_buffer) + 2 * ddx_slow * ddx_buffer + ve * ve)), uv[0]);
-        if(fabsf(uv[1])< ddx_buffer) duv_d[1] = - std::copysign(sqrtf(fabsf(2 * ddx_slow * uv[1])), uv[1]);
-        else duv_d[1] = - std::copysign(sqrtf(fabsf(2 * ddx * (fabsf(uv[1]) - ddx_buffer) + 2 * ddx_slow * ddx_buffer)), uv[1]);
-        duv_d[2] = - std::copysign(sqrtf(fabsf(2 * ddx_slow * uv[2])), uv[2]);
+        if(fabsf(uv[0])< ddx_buffer) duv_d[0] = - std::copysign(sqrtf(2 * ddx_slow * fabsf(uv[0])+ ve * ve), uv[0]);
+        else duv_d[0] = - std::copysign(sqrtf(2 * ddx * (fabsf(uv[0]) - ddx_buffer)+ 2 * ddx_slow * ddx_buffer + ve * ve), uv[0]);
+        if(fabsf(uv[1])< ddx_buffer) duv_d[1] = - std::copysign(sqrtf(2 * ddx_slow * fabsf(uv[1])), uv[1]);
+        else duv_d[1] = - std::copysign(sqrtf(2 * ddx * (fabsf(uv[1]) - ddx_buffer)+ 2 * ddx_slow * ddx_buffer), uv[1]);
+        duv_d[2] = - std::copysign(sqrtf(2 * ddx_slow * fabsf(uv[2])), uv[2]);
 
         duv_d = duv_d.each([=](float _f){
             return fabsf(_f) > vm ? std::copysign(vm, _f) : _f;
         });
         if(duv_d.norm() > vm) duv_d *= vm / duv_d.norm();
 
-        vel = dx_cal.norm();
-
         p_dx_d = dx_d;
-        dx_d = Jux(arg_uv) * duv_d;
+        dx_d = Jux(arg_uv) * duv_d + delta_dx_d;
 
-        fvector<3> del_xa;
-        
-        if(type == xd_t::Arc && dist > 0.1){
-            dx_d += arc_dir * vel * vel * dt * fvector<3>{cosf(arg_uv), sinf(arg_uv), 0};
-            del_xa = {- sinf(arg_uv), cosf(arg_uv), 0};
-            del_xa *= - arc_dir * vel * vel / xd_arc[2];
-        }
-
-        fvector<3> diff_dx = dx_d - p_dx_d;
-        float dx_max = diff_dx.abs().max();
+        fvector<3> delta_dx = dx_d - p_dx_d;
+        float dx_max = delta_dx.abs().max();
 
         for(int i = 0;i < 3;i++){
-            if(diff_dx[i] * dx_d[i] >= 0) diff_dx[i] = ddx * dt * diff_dx[i] / dx_max;
-
-            if(fabsf(p_dx_d[i] - dx_d[i])> fabsf(diff_dx[i])) dx_d[i] = p_dx_d[i] + diff_dx[i];
+            if(dx_max > ddx_rel * dt){
+                delta_dx[i] = ddx_rel * dt * delta_dx[i] / dx_max;
+                if(fabsf(p_dx_d[i] - dx_d[i])> fabsf(delta_dx[i])) dx_d[i] = p_dx_d[i] + delta_dx[i];
+            }
         }
+        
+        p_dw_d = dw_d;
+        dw_d = J(x_cal[2]).inv()* dx_d;
+        fvector<3> ddw_d = J(x_cal[2]).inv()* ((dx_d - p_dx_d)/ dt - dJ(x_cal[2], dx_cal[2])* dw_d);
+        fvector<3> dw = J(x_cal[2]).inv()* dx_cal;
+        fvector<3> ddw = J(x_cal[2]).inv()* ((dx_cal - p_dx_cal)/ dt - dJ(x_cal[2], dx_cal[2])* dw_d);
 
-        input = ke * 14 * J(x_cal[2]).inv() * dx_d
-                + Kp * J(x_cal[2]).inv()*(dx_d - dx_cal)
-                + Kd * J(x_cal[2]).inv()*(((dx_d - p_dx_d)-(dx_cal - p_dx_cal))/ dt + del_xa);
+        input = ke * 14 * dw_d + Kp *(dw_d - dw) + Kd *(ddw_d - ddw);
         e = input;
+
+        if(- uv[0] * arc_dir > 0) over = true;
 
 #elif defined PURE_PURSUIT
 
-        float dist = (xd - xd_tmp).norm();
-        for(int k = index_xd;k < n_xd;k++){
-            if(xdc_arr[k].type == xd_t::Line){
-                dist += (xdc_arr[k].xd - xdc_arr[k - 1].xd).norm();
-            }
-            else {
-                dist += xdc_arr[k].arc[2] *(xdc_arr[k].arc[4] - xdc_arr[k - 1].arc[3]);
-            }
-        }
-        vel = std::min(sqrtf(2 * ddx * fabsf(dist)), vel + ddx * dt);
-        if(vel > dx_d_max) vel = dx_d_max;
+        fvector<2> xd_2dim = top_v<3, 2>(xd);
 
-        float remain;
-        fvector<3> p_xd_remain = xd_tmp;
+        vel_tmp = std::min(sqrtf(2 * ddx * dist + ve * ve), vel_tmp + ddx * dt);
+        vel_tmp = std::min(vel_tmp, vm);
 
         p_xd_tmp = xd_tmp;
+
         if(type == xd_t::Line){
-            xd_tmp += (xd - xd_tmp)/(xd - xd_tmp).norm()* vel * dt;
+            if((xd_2dim - xd_tmp).norm()){
+                xd_tmp += (xd_2dim - xd_tmp)/(xd_2dim - xd_tmp).norm()* vel_tmp * dt;
+            }
         }
         else {
-            arg += std::copysign(vel * dt / xd_arc[2], (xd_arc[4] - xd_arc[3]));
-            xd_tmp = fvector<3>{xd_arc[0], xd_arc[1], 0} + xd_arc[2] * fvector<3>{cosf(arg), sinf(arg), 0};
-
-            // printf("%5.2f\r\n", arg);
-            // xd_tmp.print();
+            arg += std::copysign(vel_tmp * dt / xd_arc[2], (xd_arc[4] - xd_arc[3]));
+            xd_tmp = fvector<2>{xd_arc[0], xd_arc[1]} + xd_arc[2] * fvector<2>{cosf(arg), sinf(arg)};
+        }
+        
+        if((p_xd_tmp - xd_2dim)*(xd_tmp - xd_2dim)<= 0){
+            xd_tmp = xd_2dim;
+            over = true;
         }
 
-        while((p_xd_remain - xd)*(xd_tmp - xd)< 0){
-            if(index_xd >= n_xd) break;
+        dx_d = merge_v((xd_tmp - p_xd_tmp)/ dt, 0);
 
-            remain = (xd_tmp - xd).norm();
-            p_xd_remain = xd_tmp;
-            xd_tmp = xd;
-
-            type = xdc_arr[index_xd].type;
-            xd_arc = xdc_arr[index_xd].arc;
-            xd = xdc_arr[index_xd++].xd;
-            arg = xd_arc[3];
-            xd_tmp += (xd - xd_tmp)/(xd - xd_tmp).norm()* remain;
-        }
-        dx_d = (xd_tmp - p_xd_tmp)/ dt;
-
-        if(p_xd_tmp != x_org) x_org = p_xd_tmp;
-
-        if((x_org[0] != p_xd_tmp[0])||(x_org[1] != p_xd_tmp[1])){
-            arg_uv = atan2(p_xd_tmp[1] - x_org[1], p_xd_tmp[0] - x_org[0]);
-        }
-        else arg_uv = 0;
-
-        uv = Jux(arg_uv).trans()*(x_cal - xd_tmp);
+        uv = Jux(arg_uv).trans()*(x_cal - merge_v(xd_tmp, xd[2]));
         duv = Jux(arg_uv).trans()*(dx_cal - dx_d);
 
-        // if(fabsf(uv[0]) > 2) uv[0] = std::copysign(1, uv[0]);
         input = - Kp * uv - Kd * duv;
         e = J(x_cal[2]).inv() * Jux(arg_uv) * input;
-
-        // input = Kp *(xd_tmp - x_cal) + Kd *(dx_d - dx_cal);
-        // e = J(x_cal[2]).inv() * input;
 
 
 #endif
@@ -550,8 +591,7 @@ int main(void){
 
         for(int i = 0;i < 3;i++){
             diff_e[i] = de * diff_e[i] / de_max;
-            if(pe[i] - e[i] > - diff_e[i])e[i] = pe[i] + diff_e[i];
-            if(e[i] - pe[i] > diff_e[i])e[i] = pe[i] + diff_e[i];
+            if(fabsf(pe[i] - e[i])>fabsf(diff_e[i]))e[i] = pe[i] + diff_e[i];
         }
         pe = e;
 
@@ -611,23 +651,22 @@ int main(void){
 
     fclose(fp);
 
-    // i_ave /= cnt;
-    // printf("i_ave: %6.2f \r\n", i_ave.mean());
-    // i_ave.print();
-    // printf("i_peak: \r\n");
-    // i_peak.print();
-
-    fp = fopen(fname2, "w");
+    fp = fopen(fname3, "w");
     if(!fp){
         printf("file cannot open.\r\n");
         exit(EXIT_FAILURE);
     }
 
-    printf("save to file...%s\r\n", fname2);
+    printf("save to file...%s\r\n", fname3);
     fprintf(fp, "# control points\r\n");
 
-    for(int n = 0;n < n_xd;n++){
-        fprintf(fp, "%6.3f %6.3f %6.3f ", xd_arr[n][0], xd_arr[n][1], xd_arr[n][2]);
+    for(auto v : xdc_arr){
+        if(v.type == xd_t::Line){
+            fprintf(fp, "0 %6.3f %6.3f 0 0 0 ", v.xd[0], v.xd[1]);
+        }
+        else {
+            fprintf(fp, "1 %6.3f %6.3f %6.3f %6.3f %6.3f ", v.arc[0], v.arc[1], v.arc[2], v.arc[3], v.arc[4]);
+        }
         fprintf(fp, "\r\n");
     }
 
