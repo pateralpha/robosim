@@ -9,6 +9,8 @@ int make_trj(std::vector<fvector<4>> _xd, std::vector<xd_t> &_v){
         fvector<2> s(_xd[k - 1][0], _xd[k - 1][1]), e(_xd[k][0], _xd[k][1]);
         float s_ang = _xd[k - 1][3], e_ang = _xd[k][3];
 
+        float sign = s_ang > e_ang ? 1 : - 1;
+
         xd_t val;
 
         if(s_ang == e_ang){
@@ -32,7 +34,7 @@ int make_trj(std::vector<fvector<4>> _xd, std::vector<xd_t> &_v){
 
                 fvector<2> x_o = s + b[0] * fvector<2>(- sinf(s_ang), cosf(s_ang));
                 x_cross += b[1] * fvector<2>{cosf(e_ang), sinf(e_ang)};
-                
+
                 val.xd = {x_cross[0], x_cross[1], _xd[k][2]};
                 val.type = xd_t::Arc;
                 val.arc = {x_o[0], x_o[1], fabsf(b[0]), s_ang - pi/2, e_ang - pi/2};
@@ -50,7 +52,7 @@ int make_trj(std::vector<fvector<4>> _xd, std::vector<xd_t> &_v){
                 
                 val.xd = {x_cross[0], x_cross[1], _xd[k][2]};
                 val.type = xd_t::Arc;
-                val.arc = {x_o[0], x_o[1], fabsf(b[0]), s_ang - pi/2, e_ang - pi/2};
+                val.arc = {x_o[0], x_o[1], fabsf(b[0]), s_ang + sign * pi/2, e_ang + sign * pi/2};
                 _v.push_back(val);
 
                 val.xd = {e[0], e[1], _xd[k][2]};
@@ -73,7 +75,7 @@ int make_trj(std::vector<fvector<4>> _xd, std::vector<xd_t> &_v){
 
                 val.xd = {e[0], e[1], _xd[k][2]};
                 val.type = xd_t::Arc;
-                val.arc = {x_o[0], x_o[1], fabsf(b[0]), s_ang - pi/2, e_ang - pi/2};
+                val.arc = {x_o[0], x_o[1], fabsf(b[0]), s_ang + sign * pi/2, e_ang + sign * pi/2};
                 _v.push_back(val);
             }
         }

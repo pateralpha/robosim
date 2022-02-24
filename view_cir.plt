@@ -76,8 +76,8 @@ do for[i = 1:Nd + 1]{
 
     if(type_cnt[i] != 0){
         pt = pt + 1
-        x_cnt2[pt] = x_cnt[i] + r_cnt[i]*cos(te_cnt[i])
-        y_cnt2[pt] = y_cnt[i] + r_cnt[i]*sin(te_cnt[i])
+        x_cnt2[pt] = x_cnt[i] + r_cnt[i]*cos(tee_cnt[i])
+        y_cnt2[pt] = y_cnt[i] + r_cnt[i]*sin(tee_cnt[i])
     } else {
         x_cnt2[pt] = x_cnt[i]
         y_cnt2[pt] = y_cnt[i]
@@ -111,7 +111,7 @@ set terminal qt size 500, 500 font 'TimesNewRoman, 12'
 
 # set xrange [-1:3]
 # set yrange [-1:3]
-set xrange [-2:4]
+set xrange [-2:6]
 set yrange [-1:5]
 set size ratio -1
 
@@ -155,7 +155,7 @@ do for [i = 1:N]{
         y_tt every ::0::T using (x_tt[$1]):2 w l lw 3 lc 'gray30' notitle, \
         y_tt every ::(T + 1)::((T + 1)*2 - 1) using (x_tt[$1]):2 w l lw 3 lc 'gray30' notitle, \
         y_tt every ::((T + 1)*2)::((T + 1)*3 - 1) using (x_tt[$1]):2 w l lw 3 lc 'gray30' notitle, \
-        y_cnt using (type_cnt[$1] == 0 ? x_cnt[$1] : x_cnt[$1] + r_cnt[$1]*cos(te_cnt[$1])):(type_cnt[$1] == 0 ? y_cnt[$1] : y_cnt[$1] + r_cnt[$1]*sin(te_cnt[$1])) w p pointtype 6 lc 'gray70' notitle, \
+        y_cnt using (type_cnt[$1] == 0 ? x_cnt[$1] : x_cnt[$1] + r_cnt[$1]*cos(tee_cnt[$1])):(type_cnt[$1] == 0 ? y_cnt[$1] : y_cnt[$1] + r_cnt[$1]*sin(tee_cnt[$1])) w p pointtype 6 lc 'gray70' notitle, \
         y_cnt2 using (x_cnt2[$1]):2 w l lc 'gray70' notitle, \
         for[i = 1:(Nd + 1)] (((t < ts_cnt[i])||(t > te_cnt[i]))? 1/0 : x_cnt[i] + r_cnt[i]*cos(t)), (((t < ts_cnt[i])||(t > te_cnt[i]))? 1/0 : y_cnt[i] + r_cnt[i]*sin(t)) w l lc 'gray70' notitle, \
         (rad*cos(t) + x_d[i]), (rad*sin(t) + y_d[i]) lw 2 lc 'blue' notitle, \

@@ -386,6 +386,44 @@ const fvector<N> operator *(const float _a, const fvector<N> &_v){
     return v *= _a;
 }
 
+template <std::size_t N>
+inline fvector<N + 1> merge_v(float _f, fvector<N> _v){
+    fvector<N + 1> ret;
+    ret[0] = _f;
+    for(int i = 1;i <= N;i++) ret[i] = _v[i];
+    return ret;
+}
+
+template <std::size_t N>
+inline fvector<N + 1> merge_v(fvector<N> _v, float _f){
+    fvector<N + 1> ret;
+    for(int i = 0;i < N;i++) ret[i] = _v[i];
+    ret[N] = _f;
+    return ret;
+}
+
+template <std::size_t N, std::size_t M>
+inline fvector<N + M> merge_v(fvector<N> _v1, fvector<M> _v2){
+    fvector<N + M> ret;
+    for(int i = 0;i < N;i++) ret[i] = _v1[i];
+    for(int i = 0;i < M;i++) ret[i + N] = _v2[i];
+    return ret;
+}
+
+template <std::size_t N, std::size_t M>
+inline fvector<M> top_v(fvector<N> _v){
+    fvector<M> ret;
+    for(int i = 0;i < N && i < M;i++) ret[i] = _v[i];
+    return ret;
+}
+
+template <std::size_t N, std::size_t M>
+inline fvector<M> bottom_v(fvector<N> _v){
+    fvector<M> ret;
+    for(int i = (N < M ? N : M) - 1;i >= 0;i--) ret[i] = _v[i + abs(N - M)];
+    return ret;
+}
+
 template <std::size_t N, std::size_t M>
 const fmatrix<N, M> operator *(const float _a, const fmatrix<N, M> &_m){
     fmatrix<N, M> m = _m;

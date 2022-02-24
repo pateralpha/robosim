@@ -9,76 +9,17 @@
 
 #include "la.h"
 #include "circle.h"
+#include "wheel.h"
 
 using std::array;
 
-constexpr float th_omega = 1e-2; // threshold value for determining stop or not
+
+inline const float adj_pi(float _t){
+    while(_t > pi) _t -= 2 * pi;
+    while(_t < - pi) _t += 2 * pi;
+    return _t;
+}
 constexpr float inertia_of_cylinder(float _m, float _a){ return (_m * _a * _a)/ 2; }
-
-
-template <std::size_t N>
-inline fvector<N + 1> merge_v(float _f, fvector<N> _v){
-    fvector<N + 1> ret;
-    ret[0] = _f;
-    for(int i = 1;i <= N;i++) ret[i] = _v[i];
-    return ret;
-}
-
-template <std::size_t N>
-inline fvector<N + 1> merge_v(fvector<N> _v, float _f){
-    fvector<N + 1> ret;
-    for(int i = 0;i < N;i++) ret[i] = _v[i];
-    ret[N] = _f;
-    return ret;
-}
-
-template <std::size_t N, std::size_t M>
-inline fvector<N + M> merge_v(fvector<N> _v1, fvector<M> _v2){
-    fvector<N + 1> ret;
-    for(int i = 0;i < N;i++) ret[i] = _v1[i];
-    for(int i = N;i < N + M;i++) ret[i] = _v2[i];
-    return ret;
-}
-
-template <std::size_t N, std::size_t M>
-inline fvector<M> top_v(fvector<N> _v){
-    fvector<M> ret;
-    for(int i = 0;i < N && i < M;i++) ret[i] = _v[i];
-    return ret;
-}
-
-class wheel{
-public:
-    wheel(
-        float _k,   // toruque/reverse voltage coefficient
-        float _R,   // internal resistance
-        float _f0,  // maximum static friction torque
-        float _gamma// transfer efficiency
-    ) : k(_k), R(_R), f0(_f0), gamma(_gamma){}
-
-    float torque(float _omega, float _E) const{
-        float tau = torque_ac(_omega, _E); // actuation torque
-        float tauf; // friction torque or starting torque
-
-        if(fabsf(_omega)> th_omega) tauf = std::copysign(f0, _omega);
-        else tauf = std::copysign(std::min(fabsf(tau), f0), tau);
-
-        return tau - tauf;
-    }
-
-    float torque_ac(float _omega, float _E) const{
-        float i = current(_omega, _E);
-        return i * k * gamma;
-    }
-
-    float current(float _omega, float _E) const{
-        return (_E - _omega*k)/R;
-    }
-
-private:
-    float k, R;
-    float f0, gamma;
-};
 
 constexpr float r = 0.05; // radius of the wheel
 constexpr float R = 0.5; // radius of the machine / distance between CoG and wheels
@@ -91,75 +32,54 @@ auto M = diag(fvector<3>(15, 15, inertia_of_cylinder(15, R)));
 auto I = diag(fvector<3>(inertia_of_cylinder(0.1, r), inertia_of_cylinder(0.1, r), inertia_of_cylinder(0.1, r)));
 
 fmatrix<3, 3> Juw = fmatrix<3, 3>{
-        cosf(2 * pi / 3)/ r, cosf(4 * pi / 3)/ r, cosf(0)/ r,
-        sinf(2 * pi / 3)/ r, sinf(4 * pi / 3)/ r, sinf(0)/ r,
-        R / r, R / r, R / r
-}.trans();
+        cosf(2 * pi / 3), sinf(2 * pi / 3), R,
+        cosf(4 * pi / 3), sinf(4 * pi / 3), R,
+        cosf(0), sinf(0), R
+} / r;
 
-fmatrix<3, 3> Jux(float _theta){
+fmatrix<3, 3> Rux(float _theta){
     return fmatrix<3, 3>{
-            cosf(_theta), sinf(_theta), 0, 
-            - sinf(_theta), cosf(_theta), 0,
+            cosf(_theta), - sinf(_theta), 0, 
+            sinf(_theta), cosf(_theta), 0,
             0, 0, 1
-    }.trans();
+    };
 }
 
 fmatrix<3, 3> dJux(float _theta, float _dtheta){
     return fmatrix<3, 3>{
-            - sinf(_theta) * _dtheta, cosf(_theta) * _dtheta, 0, 
-            - cosf(_theta) * _dtheta, - sinf(_theta) * _dtheta, 0,
+            - sinf(_theta) * _dtheta, - cosf(_theta) * _dtheta, 0, 
+            cosf(_theta) * _dtheta, - sinf(_theta) * _dtheta, 0,
             0, 0, 0
-    }.trans();
+    };
 }
 
-fmatrix<3, 3> J(float _theta){
-    return Jux(_theta) * Juw.inv();
-}
-
-fmatrix<3, 3> dJ(float _theta, float _dtheta){
-    return dJux(_theta, _dtheta) * Juw.inv();
-}
-
-const fvector<3> upper(const fvector<6> &_v){ return fvector<3>(_v[0], _v[1], _v[2]); }
-const fvector<3> lower(const fvector<6> &_v){ return fvector<3>(_v[3], _v[4], _v[5]); }
+fmatrix<3, 3> J(float _theta){ return Rux(_theta) * Juw.inv(); }
+fmatrix<3, 3> dJ(float _theta, float _dtheta){ return dJux(_theta, _dtheta) * Juw.inv(); }
 
 fvector<6> f(fvector<6> _x, fvector<3> _e){
-    fvector<3> x = upper(_x), dx = lower(_x);
+    fvector<3> x = top_v<6, 3>(_x), dx = bottom_v<6, 3>(_x);
     float theta = x[2], dtheta = dx[2];
 
-    fvector<3> omega = J(theta).inv() * dx;
-
-    fvector<3> tau(
-            w1.torque(omega[0], _e[0]), 
-            w2.torque(omega[1], _e[1]), 
-            w3.torque(omega[2], _e[2])
-    );
+    fvector<3> w = J(theta).inv() * dx;
+    fvector<3> tau(w1.torque(w[0], _e[0]), w2.torque(w[1], _e[1]), w3.torque(w[2], _e[2]));
 
     fvector<3> ddx = (M + J(theta).trans().inv() * I * J(theta).inv()).inv() * J(theta).trans().inv() * (tau - I * dJ(theta, dtheta) * dx);
 
-    return fvector<6>(dx[0], dx[1], dx[2], ddx[0], ddx[1], ddx[2]);
+    return merge_v(dx, ddx);
 }
 
 fvector<3> du(fvector<3> _dx, fvector<3> _u){
-    return Jux(_u[2]).inv() * _dx;
+    return Rux(_u[2]).inv() * _dx;
 }
 
-void state(fvector<6> &_x, fvector<3> &_tau, fvector<3> &_i, fvector<3> _e){
-    fvector<3> x = upper(_x), dx = lower(_x);
+void state(fvector<6> _x, fvector<3> &_tau, fvector<3> &_i, fvector<3> _e){
+    fvector<3> x = top_v<6, 3>(_x), dx = bottom_v<6, 3>(_x);
     float theta = x[2], dtheta = dx[2];
 
-    fvector<3> omega = J(theta).inv() * dx;
+    fvector<3> w = J(theta).inv() * dx;
 
-    _tau = fvector<3>(
-            w1.torque(omega[0], _e[0]), 
-            w2.torque(omega[1], _e[1]), 
-            w3.torque(omega[2], _e[2])
-    );
-    _i = fvector<3>(
-            w1.current(omega[0], _e[0]), 
-            w2.current(omega[1], _e[1]),
-            w3.current(omega[2], _e[2])
-    );
+    _tau = fvector<3>(w1.torque(w[0], _e[0]), w2.torque(w[1], _e[1]), w3.torque(w[2], _e[2]));
+    _i = fvector<3>(w1.current(w[0], _e[0]), w2.current(w[1], _e[1]), w3.current(w[2], _e[2]));
 }
 
 
@@ -183,46 +103,42 @@ constexpr int skip = 5;
 #endif
 
 struct output{
+
     float t;
 
-    fvector<3> x;
-    fvector<3> dx;
+    fvector<3> x, dx;
+    fvector<3> xd, dxd;
+    fvector<3> x_cal, dx_cal;
 
-    fvector<3> xd;
-    fvector<3> dxd;
+    fvector<3> e, tau, i;
 
-    fvector<3> x_cal;
-    fvector<3> dx_cal;
-
-    fvector<3> e;
-    fvector<3> tau;
-    fvector<3> i;
 } out_v[N];
 
 output log(float _t, fvector<6> _x, fvector<3> _xd, fvector<3> _dxd, 
         fvector<3> _x_cal, fvector<3> _dx_cal, 
         fvector<3> _e, fvector<3> _tau, fvector<3> _i){
     output ret;
+
+    state(_x, ret.tau, ret.i, _e);
+
     ret.t = _t;
-    ret.x = upper(_x);
-    ret.dx = lower(_x);
+    ret.x = top_v<6, 3>(_x);
+    ret.dx = bottom_v<6, 3>(_x);
     ret.xd = _xd;
     ret.dxd = _dxd;
     ret.x_cal = _x_cal;
     ret.dx_cal = _dx_cal;
     ret.e = _e;
-    ret.tau = _tau;
-    ret.i = _i;
+
     return ret;
 }
 
-template <typename v>
-v rk4(v _v, std::function<v(v)> _f, float _dt){
-    v k1 = _f(_v);
-    v k2 = _f(_v + k1 *(_dt / 2));
-    v k3 = _f(_v + k2 *(_dt / 2));
-    v k4 = _f(_v + k3 * _dt);
-
+template <typename V>
+V rk4(V _v, std::function<V(V)> _f, float _dt){
+    V k1 = _f(_v);
+    V k2 = _f(_v + k1 *(_dt / 2));
+    V k3 = _f(_v + k2 *(_dt / 2));
+    V k4 = _f(_v + k3 * _dt);
     return _v +(_dt / 6)*(k1 + 2 * k2 + 2 * k3 + k4);
 }
 
@@ -234,7 +150,7 @@ int main(void){
 
     fvector<3> machine_pos[6];
     fvector<3> tire_pos[3][4];
-    fmatrix<3, 3> Rr = Jux(2*pi/3), Rl = Jux(-2*pi/3);
+    fmatrix<3, 3> Rr = Rux(2*pi/3), Rl = Rux(-2*pi/3);
 
     machine_pos[4] = {-0.08, -0.45, 0};
     machine_pos[5] = {0.08, -0.45, 0};
@@ -255,34 +171,26 @@ int main(void){
         tire_pos[1][k] = Rl * tire_pos[2][k];
     }
 
-    float t = 0;
-
-    fvector<6> v;
-    fvector<3> x, dx;
-    fvector<3> e, pe;
-
-    fvector<3> u;
-
-    fvector<3> omega, tau, i;
 
     constexpr float max_voltage = 18; // muximum voltage
     constexpr float sat_time = 0.2; // minimum time from 0 V to maximum
     constexpr float de = max_voltage / sat_time * dt;
-    constexpr float ke = 0.009;
 
     constexpr float m_per_pulse = 0.2355e-3;
 
-
+    /* parameters of the controller */
+    constexpr float ke = 0.009;
     constexpr float eps = 0;
 
     constexpr float ddx = 5;
-    constexpr float dx_d_max = 5;
     constexpr float ddx_slow = 3;
     constexpr float ddx_buffer = 0.3;
     constexpr float ddx_rel = ddx * 1.2;
 
-    float ddw_rel = (J(0).inv()* fvector<3>{1, 0, 0} * ddx_rel).abs().max();
+    constexpr float dx_d_max = 5;
+    /* */
 
+    /* list of desired points */
     // std::vector<fvector<3>> xd_vec = {
     //     {0, 0, 0},
     //     {2, 1, pi/4},
@@ -305,19 +213,19 @@ int main(void){
     //     {1, 4, 0},
     // };
 
-    std::vector<fvector<4>> xd_vec = {
-        {0, 0, 0, 0},
-        {2, 1.5, 0, pi/2},
-        {2, 2.5, 0, pi/2},
-        {1, 4, 0, 3*pi/4}
-    };
-
     // std::vector<fvector<4>> xd_vec = {
     //     {0, 0, 0, 0},
-    //     {2, 1, pi/4, pi/2},
-    //     {2, 2.5, pi/4, pi/2},
+    //     {2, 1.5, 0, pi/2},
+    //     {2, 2.5, 0, pi/2},
     //     {1, 4, 0, 3*pi/4}
     // };
+
+    std::vector<fvector<4>> xd_vec = {
+        {0, 0, 0, 0},
+        {2, 1, pi/4, pi/2},
+        {2, 2.5, pi/4, pi/2},
+        {3, 4, 0, pi/4}
+    };
 
     // std::vector<fvector<4>> xd_vec = {
     //     {0, 0, 0, 0},
@@ -340,62 +248,67 @@ int main(void){
     }
     (xdc_arr.end() - 1)->v_e = 0;
 
-    fvector<3> xd = xdc_arr[0].xd, p_xd;
+    fvector<3> xd;
+    /* */
 
-    int type = xdc_arr[0].type;
-    fvector<5> xd_arc = xdc_arr[0].arc;
-    float arc_dir = xdc_arr[0].arc[4] > xdc_arr[0].arc[3] ? -1 : 1;
-    float vm = xdc_arr[0].v_m, ve = xdc_arr[0].v_e;
-    
 
-    int index_xd = 1;
+    int index_xd = 0;
 
+    /* variables for circular following */
+    xd_t::type_t type;
+    fvector<5> xd_arc;
+    float arc_dir;
+    /* */
+
+    /* velocity control */
+    fvector<3> dx_d, p_dx_d;
+    float vm, ve;
+    /* */
+
+    /* dead reckoning */
     int enc_u = 0, enc_v = 0;
     int p_enc_u = enc_u, p_enc_v = enc_v;
-    fvector<3> del_u;
-    fvector<3> x_cal, p_x_cal;
+    fvector<3> delta_u;
 
-    fvector<3> x_org = upper(v);
-    fvector<3> dx_cal, p_dx_cal, dx_d, p_dx_d, duv_d, dw_d, p_dw_d;
-    fvector<3> delta_dx_d;
-
-    fvector<2> xd_tmp, p_xd_tmp;
-    float arg = xd_arc[3];
-    float vel_tmp = 0;
-    float vel = 0;
-    
-    fvector<3> uv, duv;
-    float arg_uv;
-
-    if((x_org[0] != xd[0])||(x_org[1] != xd[1])){
-        if(type == xd_t::Line){
-            arg_uv = atan2(xd[1] - x_org[1], xd[0] - x_org[0]);
-        }
-        else if(type == xd_t::Arc){
-            arg_uv = xd_arc[3];
-        }
-    }
-    else arg_uv = 0;
-
-    if(index_xd < n_xd){
-        if(xdc_arr[index_xd].type == xd_t::Arc){
-            ve = std::min(sqrtf(xdc_arr[index_xd].arc[2] * ddx), ve);
-        }
-    }
-
-    bool over = false;
-
-    fvector<3> input;
+    fvector<3> x_cal = xd, p_x_cal;
     fvector<2> x_cal_pol;
 
+    fvector<3> dx_cal, p_dx_cal;
+    /* */
+    
+    /* rotational coordinate */
+    fvector<3> x_org;
+    fvector<3> uv, duv;
+    float arg_uv;
+    /* */
+
+    /* variables for pure-pursuit */
+    fvector<2> xd_tmp, p_xd_tmp;
+    float arg, vel_tmp = 0;
+    /* */
+
+    bool over = true;
+    fvector<3> input;
 
 
+    fvector<6> v;
+    fvector<3> x, dx;
+    fvector<3> e, pe;
+
+    fvector<3> u;
+
+    fvector<3> tau, i;
+
+
+
+
+    float t = 0;
 
     /* simulation for loop starts here */
     for(int n = 0;n < N;n++, t += dt){
 
-        x = upper(v);
-        dx = lower(v);
+        x = top_v<6, 3>(v);
+        dx = bottom_v<6, 3>(v);
 
 #ifndef PURE_PURSUIT
         out_v[n] = log(t, v, xd, dx_d, x_cal, dx_cal, e, tau, i);
@@ -408,17 +321,16 @@ int main(void){
         enc_u = u[0] / m_per_pulse;
         enc_v = u[1] / m_per_pulse;
 
-        del_u = fvector<3>(
+        delta_u = fvector<3>(
                 (enc_u - p_enc_u)* m_per_pulse, 
                 (enc_v - p_enc_v)* m_per_pulse, 
                 0
         );
 
         p_x_cal = x_cal;
-        p_xd = xd;
 
         x_cal[2] = x[2];
-        x_cal = x_cal + Jux(x_cal[2]) * del_u;
+        x_cal = x_cal + Rux(x_cal[2]) * delta_u;
 
         p_enc_u = enc_u;
         p_enc_v = enc_v;
@@ -429,7 +341,7 @@ int main(void){
 
         /* control input calculation */
         // check convergence and update xd if x_cal converged to xd
-        if((xd - x_cal).norm() < eps || over){
+        if((xd - x_cal).norm() <= eps || over){
 
             over = false;
             if(index_xd < n_xd){
@@ -462,54 +374,41 @@ int main(void){
             }
         }
 
-        if(type == xd_t::Arc){
-            fvector<2> xd_arc_org = {xd_arc[0], xd_arc[1]};
-            fvector<2> x_cal_tmp = fvector<2>{x_cal[0], x_cal[1]} - xd_arc_org;
-            x_cal_pol = {x_cal_tmp.norm(), atan2(x_cal_tmp[1], x_cal_tmp[0])};
-            arc_dir = xd_arc[4] > xd_arc[3] ? -1 : 1;
-            arg_uv = ((arc_dir*(x_cal_pol[1] - xd_arc[3]))> 0 ? xd_arc[3] : x_cal_pol[1]) - pi / 2 * arc_dir;
-            while(arg_uv > pi)arg_uv -= 2*pi;
-            while(arg_uv < -pi)arg_uv += 2*pi;
-        }
-        else arc_dir = - 1;
-
-        if(type == xd_t::Line){
-        // || (xd - x_cal).norm() < 0.1){
-            uv = Jux(arg_uv).trans()*(x_cal - xd);
-            duv = Jux(arg_uv).trans()*(dx_cal - (xd - p_xd)/ dt);
-        }
-        else {
-            float x_t_diff = x_cal_pol[1] - xd_arc[4];
-            while(x_t_diff > pi)x_t_diff -= 2*pi;
-            while(x_t_diff < -pi)x_t_diff += 2*pi;
-            uv = fvector<3>{xd_arc[2]*(x_t_diff), arc_dir*(x_cal_pol[0] - xd_arc[2]), x_cal[2] - xd[2]};
-            duv = Jux(arg_uv).trans()*(dx_cal - (xd - p_xd)/ dt);
-        }
-
         float dist;
 
         if(type == xd_t::Line){
-            dist = (Jux(arg_uv).trans()*(merge_v(xd_tmp, 0) - xd)).abs()[0];
+            uv = Rux(arg_uv).trans()*(x_cal - xd);
+            duv = Rux(arg_uv).trans()* dx_cal;
+
+            arc_dir = - 1;
+            dist = (Rux(arg_uv).trans()*(merge_v(xd_tmp, 0) - xd)).abs()[0];
         }
         else {
-            float x_t_diff = arg - xd_arc[4];
+            fvector<2> x_cal_tmp = top_v<3, 2>(x_cal) - top_v<5, 2>(xd_arc);
+            x_cal_pol = {x_cal_tmp.norm(), atan2(x_cal_tmp[1], x_cal_tmp[0])};
+
+            arc_dir = xd_arc[4] > xd_arc[3] ? -1 : 1;
+            arg_uv = ((arc_dir*(x_cal_pol[1] - xd_arc[3]))> 0 ? xd_arc[3] : x_cal_pol[1]) - pi / 2 * arc_dir;
+            arg_uv = adj_pi(arg_uv);
+
+            float x_t_diff = adj_pi(- arc_dir *(x_cal_pol[1] - xd_arc[4]));
+            
+            uv = fvector<3>{xd_arc[2]*(x_t_diff), arc_dir*(x_cal_pol[0] - xd_arc[2]), x_cal[2] - xd[2]};
+            duv = Rux(arg_uv).trans()* dx_cal;
+
             dist = fabsf(xd_arc[2]*x_t_diff);
         }
 
-        // vel = (Jux(arg_uv).trans()* dx_cal)[0];
-        // if(type == xd_t::Arc){
-        //     delta_dx_d = - arc_dir * vel * vel * dt * fvector<3>{- sinf(arg_uv), cosf(arg_uv), 0} / xd_arc[2];
-        // }
-        // else delta_dx_d = {0, 0, 0};
-
 #ifdef POS_PD
         /* PD feedback in uv-coordinate */
-        duv += Jux(arg_uv).trans() * delta_dx_d;
+        duv += Rux(arg_uv).trans() * delta_dx_d;
 
         input = - Kp * uv - Kd * duv;
-        e = J(x_cal[2]).inv() * Jux(arg_uv) * input;
+        e = J(x_cal[2]).inv() * Rux(arg_uv) * input;
 
 #elif defined VEL_PD
+
+        fvector<3> duv_d;
 
         if(fabsf(uv[0])< ddx_buffer) duv_d[0] = - std::copysign(sqrtf(2 * ddx_slow * fabsf(uv[0])+ ve * ve), uv[0]);
         else duv_d[0] = - std::copysign(sqrtf(2 * ddx * (fabsf(uv[0]) - ddx_buffer)+ 2 * ddx_slow * ddx_buffer + ve * ve), uv[0]);
@@ -517,13 +416,11 @@ int main(void){
         else duv_d[1] = - std::copysign(sqrtf(2 * ddx * (fabsf(uv[1]) - ddx_buffer)+ 2 * ddx_slow * ddx_buffer), uv[1]);
         duv_d[2] = - std::copysign(sqrtf(2 * ddx_slow * fabsf(uv[2])), uv[2]);
 
-        duv_d = duv_d.each([=](float _f){
-            return fabsf(_f) > vm ? std::copysign(vm, _f) : _f;
-        });
+        duv_d = duv_d.each([=](float _f){ return fabsf(_f) > vm ? std::copysign(vm, _f) : _f; });
         if(duv_d.norm() > vm) duv_d *= vm / duv_d.norm();
 
         p_dx_d = dx_d;
-        dx_d = Jux(arg_uv) * duv_d + delta_dx_d;
+        dx_d = Rux(arg_uv) * duv_d;
 
         fvector<3> delta_dx = dx_d - p_dx_d;
         float dx_max = delta_dx.abs().max();
@@ -534,17 +431,13 @@ int main(void){
                 if(fabsf(p_dx_d[i] - dx_d[i])> fabsf(delta_dx[i])) dx_d[i] = p_dx_d[i] + delta_dx[i];
             }
         }
-        
-        p_dw_d = dw_d;
-        dw_d = J(x_cal[2]).inv()* dx_d;
-        fvector<3> ddw_d = J(x_cal[2]).inv()* ((dx_d - p_dx_d)/ dt - dJ(x_cal[2], dx_cal[2])* dw_d);
-        fvector<3> dw = J(x_cal[2]).inv()* dx_cal;
-        fvector<3> ddw = J(x_cal[2]).inv()* ((dx_cal - p_dx_cal)/ dt - dJ(x_cal[2], dx_cal[2])* dw_d);
 
-        input = ke * 14 * dw_d + Kp *(dw_d - dw) + Kd *(ddw_d - ddw);
+        input = ke * 14 * J(x_cal[2]).inv()* dx_d
+                + Kp * J(x_cal[2]).inv()*(dx_d - dx_cal)
+                + Kd * J(x_cal[2]).inv()*(((dx_d - p_dx_d) - (dx_cal - p_dx_cal))/ dt - dJ(x_cal[2], dx_cal[2])* J(x_cal[2])*(dx_d - dx_cal));
         e = input;
 
-        if(- uv[0] * arc_dir > 0) over = true;
+        if(uv[0] > 0) over = true;
 
 #elif defined PURE_PURSUIT
 
@@ -572,11 +465,11 @@ int main(void){
 
         dx_d = merge_v((xd_tmp - p_xd_tmp)/ dt, 0);
 
-        uv = Jux(arg_uv).trans()*(x_cal - merge_v(xd_tmp, xd[2]));
-        duv = Jux(arg_uv).trans()*(dx_cal - dx_d);
+        uv = Rux(arg_uv).trans()*(x_cal - merge_v(xd_tmp, xd[2]));
+        duv = Rux(arg_uv).trans()*(dx_cal - dx_d);
 
         input = - Kp * uv - Kd * duv;
-        e = J(x_cal[2]).inv() * Jux(arg_uv) * input;
+        e = J(x_cal[2]).inv() * Rux(arg_uv) * input;
 
 
 #endif
@@ -597,15 +490,18 @@ int main(void){
 
         /**** end of calc. for controller ****/
 
+
+
         v = rk4<fvector<6>>(v, [=](fvector<6> _v){ return f(_v, e); }, dt);
         u = rk4<fvector<3>>(u, [=](fvector<3> _u){ return du(dx, _u); }, dt);
 
-        state(v, tau, i, e);
     }
 
     /* simulation completed */
     printf("calculation finish.\r\n");
     
+
+
 
     FILE *fp = fopen(fname, "w");
     if(!fp){
@@ -635,11 +531,11 @@ int main(void){
         fprintf(fp, "%6.2f %6.2f %6.2f ", out_v[n].i[0], out_v[n].i[1], out_v[n].i[2]);
 
         for(int k = 0;k < 6;k++){
-            machine = out_v[n].x + Jux(out_v[n].x[2]) * machine_pos[k];
+            machine = out_v[n].x + Rux(out_v[n].x[2]) * machine_pos[k];
             fprintf(fp, "%6.3f %6.3f ", machine[0], machine[1]);
         }
         for(int l = 0;l < 4*3;l++){
-            tire = out_v[n].x + Jux(out_v[n].x[2]) * tire_pos[l / 4][l % 4];
+            tire = out_v[n].x + Rux(out_v[n].x[2]) * tire_pos[l / 4][l % 4];
             fprintf(fp, "%6.3f %6.3f ", tire[0], tire[1]);
         }
         fprintf(fp, "\r\n");
