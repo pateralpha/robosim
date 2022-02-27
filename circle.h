@@ -22,5 +22,10 @@ struct xd_t{
     }
 };
 
-int make_trj(std::vector<fvector<4>> _xd, std::vector<xd_t> &_v);
-int make_trj(std::vector<fvector<3>> _xd, std::vector<xd_t> &_v);
+int make_trj(std::vector<fvector<4>> _xd, std::vector<xd_t> &_v, float _vm, float _ve = 100);
+int make_trj(std::vector<fvector<3>> _xd, std::vector<xd_t> &_v, float _vm, float _ve = 0);
+
+fvector<3> ragrange(std::vector<xd_t> _xd_vec, float _u);
+float drdu(std::vector<xd_t> _xd_vec, float _u);
+float arg_rag(std::vector<xd_t> _xd_vec, float _u);
+float v_max(float vm, float ddx, std::vector<xd_t> _xd_vec, float _u);

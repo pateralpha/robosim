@@ -2,7 +2,7 @@
 
 
 
-int make_trj(std::vector<fvector<4>> _xd, std::vector<xd_t> &_v){
+int make_trj(std::vector<fvector<4>> _xd, std::vector<xd_t> &_v, float _vm, float _ve){
     _v.clear();
     int num = _xd.size();
     for(int k = 1;k < num;k++){
@@ -81,22 +81,81 @@ int make_trj(std::vector<fvector<4>> _xd, std::vector<xd_t> &_v){
         }
     }
 
+    for(auto &x : _v){
+        x.v_m = _vm;
+        x.v_e = std::min(_ve, _vm);
+    }
+    (_v.end() - 1)->v_e = 0;
+
     return _v.size();
 }
 
 
-int make_trj(std::vector<fvector<3>> _xd, std::vector<xd_t> &_v){
+int make_trj(std::vector<fvector<3>> _xd, std::vector<xd_t> &_v, float _vm, float _ve){
     _v.clear();
     int num = _xd.size();
     for(int k = 1;k < num;k++){
-        fvector<2> s(_xd[k - 1][0], _xd[k - 1][1]), e(_xd[k][0], _xd[k][1]);
-        float s_ang = _xd[k - 1][3], e_ang = _xd[k][3];
+        fvector<2> e(_xd[k][0], _xd[k][1]);
 
         xd_t val;
 
         val.xd = {e[0], e[1], _xd[k][2]};
         val.type = xd_t::Line;
+        val.v_m = _vm;
+        val.v_e = std::min(_ve, _vm);
         _v.push_back(val);
     }
+    (_v.end() - 1)->v_e = 0;
     return _v.size();
+}
+
+fvector<3> ragrange(std::vector<xd_t> _xd_vec, float _u){
+
+    int num = _xd_vec.size();
+    float l[num];
+    fvector<3> ret;
+
+    _xd_vec.insert(_xd_vec.begin(), xd_t{});
+
+    for(int i = 0;i < num + 1;i++){
+        l[i] = 1;
+        for(int j = 0;j < num + 1;j++){
+            if(i == j) continue;
+            l[i] *= (_u * num - j)/(i - j);
+        }
+
+        ret += l[i] * _xd_vec[i].xd;
+    }
+
+    return ret;
+}
+
+float drdu(std::vector<xd_t> _xd_vec, float _u){
+    float du = 0.001;
+
+    fvector<3> r = ragrange(_xd_vec, _u);
+    fvector<3> dr = ragrange(_xd_vec, _u + du);
+
+    return (r - dr).norm() / du;
+}
+
+float arg_rag(std::vector<xd_t> _xd_vec, float _u){
+    float du = 0.001;
+
+    fvector<3> r = ragrange(_xd_vec, _u);
+    fvector<3> dr = ragrange(_xd_vec, _u + du);
+
+    return atan2((dr - r)[1], (dr - r)[0]);
+}
+
+float v_max(float vm, float ddx, std::vector<xd_t> _xd_vec, float _u){
+    float du = 0.001;
+
+    float t = arg_rag(_xd_vec, _u);
+    float dt = arg_rag(_xd_vec, _u + du);
+
+    float r = 1000;
+    if(fabsf(dt - t)/ du > 0.001) r = drdu(_xd_vec, _u) / fabsf(dt - t) * du;
+
+    return std::min(vm, sqrtf(ddx * r));
 }

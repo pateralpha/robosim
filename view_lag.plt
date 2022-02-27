@@ -120,7 +120,7 @@ set terminal qt size 500, 500 font 'TimesNewRoman, 12'
 
 # set xrange [-1:3]
 # set yrange [-1:3]
-set xrange [-2:6]
+set xrange [-2:4]
 set yrange [-1:5]
 set size ratio -1
 
