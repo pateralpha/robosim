@@ -6,6 +6,7 @@
 #include <functional>
 #include <array>
 #include <limits>
+#include <vector>
 
 #include "la.h"
 #include "circle.h"
@@ -88,8 +89,10 @@ constexpr float dt = 0.01;
 constexpr int skip = 5;
 
 // #define POS_PD
-// #define VEL_PD
-#define PURE_PURSUIT
+#define VEL_PD
+// #define PURE_PURSUIT
+
+#define LAGRANGE
 
 #ifdef POS_PD
     auto Kp = diag<3>(1, 5, 2);
@@ -142,6 +145,57 @@ V rk4(V _v, std::function<V(V)> _f, float _dt){
     return _v +(_dt / 6)*(k1 + 2 * k2 + 2 * k3 + k4);
 }
 
+fvector<3> ragrange(std::vector<xd_t> _xd_vec, float _u){
+
+    int num = _xd_vec.size();
+    float l[num];
+    fvector<3> ret;
+
+    _xd_vec.insert(_xd_vec.begin(), xd_t{});
+
+    for(int i = 0;i < num + 1;i++){
+        l[i] = 1;
+        for(int j = 0;j < num + 1;j++){
+            if(i == j) continue;
+            l[i] *= (_u * num - j)/(i - j);
+        }
+
+        ret += l[i] * _xd_vec[i].xd;
+    }
+
+    return ret;
+}
+
+float drdu(std::vector<xd_t> _xd_vec, float _u){
+    float du = 0.001;
+
+    fvector<3> r = ragrange(_xd_vec, _u);
+    fvector<3> dr = ragrange(_xd_vec, _u + du);
+
+    return (r - dr).norm() / du;
+}
+
+float arg_rag(std::vector<xd_t> _xd_vec, float _u){
+    float du = 0.001;
+
+    fvector<3> r = ragrange(_xd_vec, _u);
+    fvector<3> dr = ragrange(_xd_vec, _u + du);
+
+    return atan2((dr - r)[1], (dr - r)[0]);
+}
+
+float v_max(float vm, float ddx, std::vector<xd_t> _xd_vec, float _u){
+    float du = 0.001;
+
+    float t = arg_rag(_xd_vec, _u);
+    float dt = arg_rag(_xd_vec, _u + du);
+
+    float r = 1000;
+    if(fabsf(dt - t)/ du > 0.001) r = drdu(_xd_vec, _u) / fabsf(dt - t) * du;
+
+    return std::min(vm, sqrtf(ddx * r));
+}
+
 int main(void){
 
     char fname[] = "a.dat";
@@ -182,8 +236,8 @@ int main(void){
     constexpr float ke = 0.01;
     constexpr float eps = 0;
 
-    constexpr float ddx = 5;
-    constexpr float ddx_slow = 3;
+    constexpr float ddx = 4;
+    constexpr float ddx_slow = 2;
     constexpr float ddx_buffer = 0.3;
     constexpr float ddx_rel = ddx * 1.5;
 
@@ -250,7 +304,7 @@ int main(void){
 
     for(auto &v : xdc_arr){
         v.v_m = dx_d_max;
-        v.v_e = dx_d_max;
+        v.v_e = 0;
         v.xd.print();
     }
     (xdc_arr.end() - 1)->v_e = 0;
@@ -292,6 +346,7 @@ int main(void){
     /* variables for pure-pursuit */
     fvector<2> xd_tmp, p_xd_tmp;
     float arg, vel_tmp = 0;
+    float p = 0;
     /* */
 
     bool over = true;
@@ -406,12 +461,41 @@ int main(void){
             dist = fabsf(xd_arc[2] * adj_pi(arg - xd_arc[4]));
         }
 
+#ifdef LAGRANGE
+
+        arg_uv = arg_rag(xdc_arr, p);
+
+        xd = ragrange(xdc_arr, p);
+        uv = Rux(arg_uv).trans()*(x_cal - xd);
+
+        arc_dir = - 1;
+        dist = ((xdc_arr.end() - 1)->xd - x_cal).norm();
+
+        if(dist > 1)uv[0] = - dist;
+        else uv[0] = (Rux(arg_uv).trans()*(x_cal - (xdc_arr.end() - 1)->xd))[0];
+
+        ve = 0;
+        vm = v_max(dx_d_max, ddx, xdc_arr, p);
+#endif
+
 #ifdef POS_PD
         /* PD feedback in uv-coordinate */
         input = - Kp * uv - Kd * duv;
         e = J(x_cal[2]).inv() * Rux(arg_uv) * input;
 
 #elif defined VEL_PD
+
+#ifdef LAGRANGE
+
+        if(drdu(xdc_arr, p) > 0.0001){
+            p += dx_cal.norm() * dt / drdu(xdc_arr, p);
+            p += (Rux(arg_uv).trans()*(x_cal - xd))[0] / drdu(xdc_arr, p);
+        }
+        else p += 0.0001;
+
+        if(p < 0) p = 0;
+        if(p > 1) p = 1;
+#endif
 
         fvector<3> duv_d;
 
@@ -424,15 +508,19 @@ int main(void){
         duv_d = duv_d.each([=](float _f){ return std::copysign(std::min(fabsf(_f), vm), _f); });
         if(duv_d.norm() > vm) duv_d *= vm / duv_d.norm();
 
+        uv.print();
+        duv_d.print();
+
         p_dx_d = dx_d;
         dx_d = Rux(arg_uv) * duv_d;
 
         fvector<3> delta_dx = dx_d - p_dx_d;
-        float dx_max = delta_dx.abs().max();
+        float dx_max = delta_dx.abs().norm();
 
         for(int i = 0;i < 3;i++){
             if(dx_max > ddx_rel * dt){
-                delta_dx[i] = ddx_rel * dt * delta_dx[i] / dx_max;
+                if(delta_dx[i] * dx_cal[i] < 0) delta_dx[i] = ddx_rel * dt * delta_dx[i] / dx_max;
+                else delta_dx[i] = ddx * dt * delta_dx[i] / dx_max;
                 if(fabsf(p_dx_d[i] - dx_d[i])> fabsf(delta_dx[i])) dx_d[i] = p_dx_d[i] + delta_dx[i];
             }
         }
@@ -448,10 +536,27 @@ int main(void){
 
         fvector<2> xd_2dim = top_v<3, 2>(xd);
 
+#ifdef LAGRANGE
+        dist = (top_v<3, 2>((xdc_arr.end() - 1)->xd) - xd_tmp).norm();
+#endif
+
         vel_tmp = std::min(sqrtf(2 * ddx * dist + ve * ve), vel_tmp + ddx * dt);
         vel_tmp = std::min(vel_tmp, vm);
 
         p_xd_tmp = xd_tmp;
+
+#ifdef LAGRANGE
+
+        if(drdu(xdc_arr, p) > 0.001) p += vel_tmp * dt / drdu(xdc_arr, p);
+        else p += 0.001;
+
+        if(p > 1)p = 1;
+
+        xd_tmp = top_v<3, 2>(ragrange(xdc_arr, p));
+
+        dx_d = merge_v((xd_tmp - p_xd_tmp)/ dt, 0);
+        uv = Rux(arg_uv).trans()*(x_cal - ragrange(xdc_arr, p));
+#else
 
         if(type == xd_t::Line){
             if((xd_2dim - xd_tmp).norm()){
@@ -462,6 +567,7 @@ int main(void){
             arg += std::copysign(vel_tmp * dt / xd_arc[2], (xd_arc[4] - xd_arc[3]));
             xd_tmp = fvector<2>{xd_arc[0], xd_arc[1]} + xd_arc[2] * fvector<2>{cosf(arg), sinf(arg)};
         }
+
         
         if((p_xd_tmp - xd_2dim)*(xd_tmp - xd_2dim)<= 0){
             xd_tmp = xd_2dim;
@@ -469,8 +575,9 @@ int main(void){
         }
 
         dx_d = merge_v((xd_tmp - p_xd_tmp)/ dt, 0);
-
         uv = Rux(arg_uv).trans()*(x_cal - merge_v(xd_tmp, xd[2]));
+    #endif
+
         duv = Rux(arg_uv).trans()*(dx_cal - dx_d);
 
         input = - Kp * uv - Kd * duv;
