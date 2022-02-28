@@ -9,8 +9,8 @@
 #include <vector>
 
 #include "la.h"
-#include "circle.h"
-#include "wheel.h"
+#include "ip.h"
+#include "machine.h"
 
 using std::array;
 
