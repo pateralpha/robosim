@@ -39,7 +39,7 @@ void state(fvector<6> _x, fvector<3> &_tau, fvector<3> &_i, fvector<3> _e){
     fvector<3> x = top_v<6, 3>(_x), dx = bottom_v<6, 3>(_x);
     float theta = x[2], dtheta = dx[2];
 
-    fvector<3> w = J(theta).inv() * dx;
+    fvector<3> w = J_hat(theta) * dx;
 
     _tau = fvector<3>(w1.torque(w[0], _e[0]), w2.torque(w[1], _e[1]), w3.torque(w[2], _e[2]));
     _i = fvector<3>(w1.current(w[0], _e[0]), w2.current(w[1], _e[1]), w3.current(w[2], _e[2]));
@@ -171,11 +171,9 @@ int main(void){
 
     // std::vector<fvector<4>> xd_vec = {
     //     {0, 0, 0, 0},
-    //     {1, 0, 0, 0},
-    //     {3, 2, 0, pi/2},
-    //     {1, 4, 0, pi},
-    //     {-1, 2, 0, -pi/2},
-    //     {1, 0, 0, 0}
+    //     {2, 1, 0, pi/2},
+    //     {2, 2.5, 0, pi/2},
+    //     {1, 4, 0, 3*pi/4}
     // };
 
 #ifdef VEL_PD
@@ -212,11 +210,14 @@ int main(void){
     fvector<3> dx_cal, p_dx_cal;
     /* */
     
-    /* the machine coordinate */
-    fvector<3> uv, duv;
-    float arg_uv;
-    auto Rux = [&](){ return Rotr(arg_uv); };
-    auto Rxu = [&](){ return Rux().trans(); };
+    /* local coordinates */
+    fvector<3> st, dst;
+    float arg_st;
+    auto Rsx = [&](){ return Rotr(arg_st); };
+    auto Rxs = [&](){ return Rsx().trans(); };
+
+    auto Jxw = [&](){ return J_hat(x_cal[2]); };
+    auto dJxw = [&](){ return dJ_hat(x_cal[2], dx_cal[2]); };
     /* */
 
     /* variables for pure-pursuit */
@@ -290,15 +291,15 @@ int main(void){
                 }
 
                 if(top_v<3, 2>(p_xd.xd - xd.xd).norm()){
-                    arg_uv = atan2(xd.xd[1] - p_xd.xd[1], xd.xd[0] - p_xd.xd[0]);
+                    arg_st = atan2(xd.xd[1] - p_xd.xd[1], xd.xd[0] - p_xd.xd[0]);
                 }
             }
         }
 
         // calcurate position in the local coordinate
         if(xd.type == xd_t::Line){
-            uv = Rxu()*(x_cal - xd.xd);
-            duv = Rxu()* dx_cal;
+            st = Rxs()*(x_cal - xd.xd);
+            dst = Rxs()* dx_cal;
 
             arc_dir = - 1;
             dist = (xd_tmp - top_v<3, 2>(xd.xd)).norm();
@@ -308,23 +309,23 @@ int main(void){
             fvector<3> x_cal_pol = {x_cal_tmp.norm(), atan2(x_cal_tmp[1], x_cal_tmp[0])};
 
             arc_dir = xd.arc[4] > xd.arc[3] ? -1 : 1;
-            arg_uv = ((arc_dir*(x_cal_pol[1] - xd.arc[3]))> 0 ? xd.arc[3] : x_cal_pol[1]) - pi / 2 * arc_dir;
-            arg_uv = adj_pi(arg_uv);
+            arg_st = ((arc_dir*(x_cal_pol[1] - xd.arc[3]))> 0 ? xd.arc[3] : x_cal_pol[1]) - pi / 2 * arc_dir;
+            arg_st = adj_pi(arg_st);
 
             float x_t_diff = adj_pi(- arc_dir *(x_cal_pol[1] - xd.arc[4]));
             
-            uv = fvector<3>{xd.arc[2] * x_t_diff, arc_dir*(x_cal_pol[0] - xd.arc[2]), x_cal[2] - xd.xd[2]};
-            duv = Rxu()* dx_cal;
+            st = fvector<3>{xd.arc[2] * x_t_diff, arc_dir*(x_cal_pol[0] - xd.arc[2]), x_cal[2] - xd.xd[2]};
+            dst = Rxs()* dx_cal;
 
             dist = fabsf(xd.arc[2] * adj_pi(arg_tmp - xd.arc[4]));
         }
 
 #else
 
-        arg_uv = arg_rag(xdc_arr, p);
+        arg_st = arg_rag(xdc_arr, p);
 
         xd.xd = ragrange(xdc_arr, p);
-        uv = Rxu()*(x_cal - xd.xd);
+        st = Rxs()*(x_cal - xd.xd);
 
         index_xd = p * n_xd;
         if(index_xd >= n_xd) index_xd = n_xd - 1;
@@ -339,8 +340,8 @@ int main(void){
             dist += (xdc_arr[i].xd - xdc_arr[i - 1].xd).norm();
         }
 
-        if(dist > 1)uv[0] = - dist;
-        else uv[0] = (Rxu()*(x_cal - (xdc_arr.end() - 1)->xd))[0];
+        if(dist > 1)st[0] = - dist;
+        else st[0] = (Rxs()*(x_cal - (xdc_arr.end() - 1)->xd))[0];
 
         xd.v_e = 0;
         xd.v_m = v_max(dx_max, ddx, xdc_arr, p);
@@ -349,16 +350,16 @@ int main(void){
 
 
 #ifdef POS_PD
-        /* PD feedback in uv-coordinate */
-        fvector<3> input = - Kp * uv - Kd * duv;
-        e = J(x_cal[2]).inv() * Rux() * input;
+        /* PD feedback in st-coordinate */
+        fvector<3> input = - Kp * st - Kd * dst;
+        e = Jxw() * Rsx() * input;
 
 #elif defined VEL_PD
 
 #ifdef LAGRANGE
 
         if(drdu(xdc_arr, p) > 0.0001){
-            p += (dx_cal.norm() * dt + (Rxu()*(x_cal - xd.xd))[0]) / drdu(xdc_arr, p);
+            p += (dx_cal.norm() * dt + (Rxs()*(x_cal - xd.xd))[0]) / drdu(xdc_arr, p);
         }
         else p += 0.0001;
 
@@ -366,19 +367,19 @@ int main(void){
         if(p > 1) p = 1;
 #endif
 
-        fvector<3> duv_d;
+        fvector<3> dst_d;
 
-        if(fabsf(uv[0])< ddx_buffer) duv_d[0] = - std::copysign(sqrtf(2 * ddx_slow * fabsf(uv[0])+ xd.v_e * xd.v_e), uv[0]);
-        else duv_d[0] = - std::copysign(sqrtf(2 * ddx * (fabsf(uv[0]) - ddx_buffer)+ 2 * ddx_slow * ddx_buffer + xd.v_e * xd.v_e), uv[0]);
-        if(fabsf(uv[1])< ddx_buffer) duv_d[1] = - std::copysign(sqrtf(2 * ddx_slow * fabsf(uv[1])), uv[1]);
-        else duv_d[1] = - std::copysign(sqrtf(2 * ddx * (fabsf(uv[1]) - ddx_buffer)+ 2 * ddx_slow * ddx_buffer), uv[1]);
-        duv_d[2] = - std::copysign(sqrtf(2 * ddx * fabsf(uv[2])), uv[2]);
+        if(fabsf(st[0])< ddx_buffer) dst_d[0] = - std::copysign(sqrtf(2 * ddx_slow * fabsf(st[0])+ xd.v_e * xd.v_e), st[0]);
+        else dst_d[0] = - std::copysign(sqrtf(2 * ddx * (fabsf(st[0]) - ddx_buffer)+ 2 * ddx_slow * ddx_buffer + xd.v_e * xd.v_e), st[0]);
+        if(fabsf(st[1])< ddx_buffer) dst_d[1] = - std::copysign(sqrtf(2 * ddx_slow * fabsf(st[1])), st[1]);
+        else dst_d[1] = - std::copysign(sqrtf(2 * ddx * (fabsf(st[1]) - ddx_buffer)+ 2 * ddx_slow * ddx_buffer), st[1]);
+        dst_d[2] = - std::copysign(sqrtf(2 * ddx * fabsf(st[2])), st[2]);
 
-        duv_d = duv_d.each([=](float _f){ return std::copysign(std::min(fabsf(_f), xd.v_m), _f); });
-        if(duv_d.norm() > xd.v_m) duv_d *= xd.v_m / duv_d.norm();
+        dst_d = dst_d.each([=](float _f){ return std::copysign(std::min(fabsf(_f), xd.v_m), _f); });
+        if(dst_d.norm() > xd.v_m) dst_d *= xd.v_m / dst_d.norm();
 
         p_dx_d = dx_d;
-        dx_d = Rux() * duv_d;
+        dx_d = Rsx() * dst_d;
 
         fvector<3> delta_dx = dx_d - p_dx_d;
         float dx_max = delta_dx.abs().norm();
@@ -391,12 +392,12 @@ int main(void){
         }
         dx_d = p_dx_d + delta_dx;
 
-        fvector<3> input = ke * 14 * J(x_cal[2]).inv()* dx_d
-                + Kp * J(x_cal[2]).inv()*(dx_d - dx_cal)
-                + Kd * J(x_cal[2]).inv()*(((dx_d - p_dx_d) - (dx_cal - p_dx_cal))/ dt - dJ(x_cal[2], dx_cal[2])* J(x_cal[2])*(dx_d - dx_cal));
+        fvector<3> input = ke * 14 * Jxw()* dx_d
+                + Kp * Jxw()*(dx_d - dx_cal)
+                + Kd * (Jxw()*(((dx_d - p_dx_d) - (dx_cal - p_dx_cal))/ dt)+ dJxw()*(dx_d - dx_cal));
         e = input;
 
-        if(uv[0] > 0) over = true;
+        if(st[0] > 0) over = true;
 
 #elif defined PURE_PURSUIT
 
@@ -417,7 +418,7 @@ int main(void){
         
 
         xd_tmp = top_v<3, 2>(ragrange(xdc_arr, p));
-        uv = Rxu()*(x_cal - ragrange(xdc_arr, p));
+        st = Rxs()*(x_cal - ragrange(xdc_arr, p));
 #else
 
         if(xd.type == xd_t::Line){
@@ -436,14 +437,14 @@ int main(void){
             over = true;
         }
 
-        uv = Rxu()*(x_cal - merge_v(xd_tmp, xd.xd[2]));
+        st = Rxs()*(x_cal - merge_v(xd_tmp, xd.xd[2]));
 #endif /* LAGRANGE */
 
         dx_d = merge_v((xd_tmp - p_xd_tmp)/ dt, 0);
-        duv = Rxu()*(dx_cal - dx_d);
+        dst = Rxs()*(dx_cal - dx_d);
 
-        fvector<3> input = - Kp * uv - Kd * duv;
-        e = J(x_cal[2]).inv() * Rux() * input;
+        fvector<3> input = - Kp * st - Kd * dst;
+        e = Jxw() * Rsx() * input;
 
 
 #endif /* POS_PD */

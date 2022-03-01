@@ -62,25 +62,29 @@ inline fmatrix<3, 3> Rotr(float _theta){
     };
 }
 
-inline fmatrix<3, 3> dJux(float _theta, float _dtheta){
+inline fmatrix<3, 3> Rotl(float _theta){
+    return Rotr(_theta).trans();
+}
+
+inline fmatrix<3, 3> dRotl(float _theta, float _dtheta){
     return fmatrix<3, 3>{
-            - sinf(_theta) * _dtheta, - cosf(_theta) * _dtheta, 0, 
-            cosf(_theta) * _dtheta, - sinf(_theta) * _dtheta, 0,
+            - sinf(_theta) * _dtheta, cosf(_theta) * _dtheta, 0, 
+            - cosf(_theta) * _dtheta, - sinf(_theta) * _dtheta, 0,
             0, 0, 0
     };
 }
 
-inline fmatrix<3, 3> J(float _theta){ return Rotr(_theta) * Juw.inv(); }
-inline fmatrix<3, 3> dJ(float _theta, float _dtheta){ return dJux(_theta, _dtheta) * Juw.inv(); }
+inline fmatrix<3, 3> J_hat(float _theta){ return Juw * Rotl(_theta); }
+inline fmatrix<3, 3> dJ_hat(float _theta, float _dtheta){ return Juw.inv() * dRotl(_theta, _dtheta); }
 
 inline fvector<6> f(fvector<6> _x, fvector<3> _e){
     fvector<3> x = top_v<6, 3>(_x), dx = bottom_v<6, 3>(_x);
     float theta = x[2], dtheta = dx[2];
 
-    fvector<3> w = J(theta).inv() * dx;
+    fvector<3> w = J_hat(theta)* dx;
     fvector<3> tau(w1.torque(w[0], _e[0]), w2.torque(w[1], _e[1]), w3.torque(w[2], _e[2]));
 
-    fvector<3> ddx = (M + J(theta).trans().inv() * I * J(theta).inv()).inv() * J(theta).trans().inv() * (tau - I * dJ(theta, dtheta) * dx);
+    fvector<3> ddx = (M + J_hat(theta).trans() * I * J_hat(theta)).inv() * J_hat(theta).trans() * (tau - I * dJ_hat(theta, dtheta) * dx);
 
     return merge_v(dx, ddx);
 }
