@@ -104,8 +104,8 @@ array y_mt[M + 1]
 array x_tt[(T + 1)*W]
 array y_tt[(T + 1)*W]
 
-array x_obs[7] = [-2, 0, 1, 1, 0, -2, -2]
-array y_obs[7] = [1, 1, 2, 3, 4, 4, 1]
+array x_obs[7] = [1, 1, 2, 3, 4, 4, 1]
+array y_obs[7] = [-2, 0, 1, 1, 0, -2, -2]
 
 len = 0.2
 rad = 0.05
@@ -113,15 +113,15 @@ rad = 0.05
 set parametric
 set sample 500
 
-# set terminal gif animate delay 5 optimize size 500, 500 font 'TimesNewRoman, 12'
+# set terminal gif animate delay 5 optimize size 500, 400 font 'TimesNewRoman, 12'
 # set output "view.gif"
 
-set terminal qt size 500, 500 font 'TimesNewRoman, 12'
+set terminal qt size 500, 400 font 'TimesNewRoman, 12'
 
 # set xrange [-1:3]
 # set yrange [-1:3]
-set xrange [-2:4]
-set yrange [-1:5]
+set xrange [-1:5]
+set yrange [-1:4]
 set size ratio -1
 
 set trange [-pi:pi]
@@ -154,7 +154,7 @@ do for [i = 1:N]{
         y_tt[(k + 1)*(T + 1)] = y_tt[k*(T + 1) + 1]
     }
 
-    set label 1 at graph 0.7, 0.07 sprintf('time = %4.1f [s]', time[i])
+    set label 1 at graph 0.7, 0.9 sprintf('time = %4.1f [s]', time[i])
 
     set arrow 1 from x_c[i], y_c[i] to (x_c[i] + len*cos(t_c[i])), (y_c[i] + len*sin(t_c[i])) lw 2 lc 'red'
     set arrow 2 from x_c[i], y_c[i] to (x_c[i] - len*sin(t_c[i])), (y_c[i] + len*cos(t_c[i])) lw 2 lc 'blue'
